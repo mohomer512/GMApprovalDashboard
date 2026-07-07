@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 313" role="img" aria-labelledby="title desc">
+  <title id="title">Besafe</title>
+  <desc id="desc">Besafe Advanced Cybersecurity SA logo</desc>
+  <rect width="768" height="313" fill="#050505"/>
+  <g transform="translate(44 28)">
+    <path fill="#10e59a" d="M84 2 3 42v44c0 54 31 101 81 126 50-25 81-72 81-126V42L84 2Z"/>
+    <path fill="#050505" d="M23 45 88 13c10-5 18 9 8 14L18 66V52c0-3 2-6 5-7Z"/>
+    <path fill="#050505" d="M18 89 112 43c9-5 18 9 8 14L18 107V89Z"/>
+    <path fill="#050505" d="M23 127 140 70c8-4 16 8 7 13L34 139c-5-4-8-8-11-12Z"/>
+    <path fill="#050505" d="M52 158 150 109c7-4 15 8 7 12l-85 43c-7-2-14-4-20-6Z"/>
+  </g>
+  <text x="245" y="165" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="133" font-weight="300">be<tspan font-weight="700">safe</tspan></text>
+  <text x="43" y="286" fill="#ffffff" font-family="Segoe UI, Arial, sans-serif" font-size="42" font-weight="400">BESafe Advanced Cybersecurity SA</text>
+</svg>

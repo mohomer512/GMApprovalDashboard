@@ -1,0 +1,11 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "isCreatingSolution": true,
+    "environment": "spo",
+    "version": "1.5.1",
+    "libraryName": "gm-approval-dashboard",
+    "libraryId": "d6fb1009-1cf2-4ae1-b956-b1b2c5e6c52a",
+    "packageManager": "npm",
+    "componentType": "webpart"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
+  "version": "2.0",
+  "bundles": {
+    "gm-approval-dashboard-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/gmApprovalDashboard/GmApprovalDashboardWebPart.js",
+          "manifest": "./src/webparts/gmApprovalDashboard/GmApprovalDashboardWebPart.manifest.json"
+        }
+      ]
+    }
+  },
+  "externals": {},
+  "localizedResources": {
+    "GmApprovalDashboardWebPartStrings": "lib/webparts/gmApprovalDashboard/loc/{locale}.js"
+  }
+}
