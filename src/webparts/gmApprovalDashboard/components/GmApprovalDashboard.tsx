@@ -83,6 +83,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   private pdfJsonFieldName: string = 'PDFFileJson';
   private odataJsonHeader: string = 'application/json;odata=verbose';
   private requestsListItemEntityTypeFullName: string = '';
+  private documentsLibraryListItemEntityTypeFullName: string = '';
   private pdfFileInput: HTMLInputElement;
   private besafeLogoUrl: string = require('../assets/besafe-logo.svg');
   private translations: { [key: string]: ITranslatedText } = {
@@ -443,6 +444,33 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
         const listData: any = data.d ? data.d : data;
         this.requestsListItemEntityTypeFullName = listData.ListItemEntityTypeFullName || '';
         return this.requestsListItemEntityTypeFullName;
+      });
+  }
+
+  private getDocumentsLibraryListItemEntityTypeFullName(): Promise<string> {
+    if (this.documentsLibraryListItemEntityTypeFullName) {
+      return Promise.resolve(this.documentsLibraryListItemEntityTypeFullName);
+    }
+
+    const url: string = this.webUrl +
+      "/_api/web/lists/GetByTitle('" + this.escapeODataString(this.documentsLibraryName) + "')" +
+      "?$select=ListItemEntityTypeFullName";
+
+    return this.props.context.spHttpClient
+      .get(url, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
+      .then((response: SPHttpClientResponse) => {
+        if (!response.ok) {
+          return response.text().then((text: string) => {
+            throw new Error(text);
+          });
+        }
+
+        return response.json();
+      })
+      .then((data: any) => {
+        const listData: any = data.d ? data.d : data;
+        this.documentsLibraryListItemEntityTypeFullName = listData.ListItemEntityTypeFullName || '';
+        return this.documentsLibraryListItemEntityTypeFullName;
       });
   }
 
@@ -1014,22 +1042,18 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   }
 
   private updateLibraryFileMetadata(serverRelativeUrl: string, fileName: string, requestNo: string, itemId: number): Promise<void> {
-    const values: any = {
+    const requiredValues: any = {
       Title: fileName,
       RequestNo: requestNo,
-      RequestItemId: itemId,
-      DocumentType: 'Request PDF',
-      ApprovalProcessed: false
+      RequestItemId: itemId
     };
 
-    return this.mergeLibraryFileMetadata(serverRelativeUrl, values)
+    const valuesWithDocumentType: any = this.copyValues(requiredValues);
+    valuesWithDocumentType.DocumentType = 'Request PDF';
+
+    return this.mergeLibraryFileMetadata(serverRelativeUrl, valuesWithDocumentType)
       .catch(() => {
-        return this.mergeLibraryFileMetadata(serverRelativeUrl, {
-          Title: fileName
-        });
-      })
-      .catch(() => {
-        return;
+        return this.mergeLibraryFileMetadata(serverRelativeUrl, requiredValues);
       });
   }
 
@@ -1038,19 +1062,14 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       "/_api/web/GetFileByServerRelativeUrl('" + this.escapeODataString(serverRelativeUrl) + "')" +
       "/ListItemAllFields";
 
-    const options: ISPHttpClientOptions = {
-      headers: {
-        'Accept': this.odataJsonHeader,
-        'Content-Type': this.odataJsonHeader,
-        'IF-MATCH': '*',
-        'X-HTTP-Method': 'MERGE',
-        'odata-version': ''
-      },
-      body: JSON.stringify(values)
-    };
+    return this.getDocumentsLibraryListItemEntityTypeFullName()
+      .then((entityTypeName: string) => {
+        const updateBody: any = this.addODataMetadata(values, entityTypeName);
+        const options: ISPHttpClientOptions = this.getJsonMergeOptions(updateBody);
 
-    return this.props.context.spHttpClient
-      .post(url, SPHttpClient.configurations.v1, options)
+        return this.props.context.spHttpClient
+          .post(url, SPHttpClient.configurations.v1, options);
+      })
       .then((response: SPHttpClientResponse) => {
         if (!response.ok) {
           return response.text().then((text: string) => {
@@ -1058,6 +1077,18 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           });
         }
       });
+  }
+
+  private copyValues(values: any): any {
+    const result: any = {};
+
+    for (const key in values) {
+      if (values.hasOwnProperty(key)) {
+        result[key] = values[key];
+      }
+    }
+
+    return result;
   }
 
   private attachPdfFileToRequestItem(itemId: number, fileName: string, fileContent: ArrayBuffer): Promise<string> {
