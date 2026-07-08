@@ -293,10 +293,14 @@ function Get-AvailableListTitles {
 
   $titles = @()
 
-  foreach ($list in $Web.Lists) {
-    if (-not $list.Hidden) {
-      $titles += [string]$list.Title
+  try {
+    foreach ($list in $Web.Lists) {
+      if (-not $list.Hidden) {
+        $titles += [string]$list.Title
+      }
     }
+  } catch {
+    return ("Could not enumerate lists. Current Windows identity '{0}' received: {1}" -f [System.Security.Principal.WindowsIdentity]::GetCurrent().Name, $_.Exception.Message)
   }
 
   return ($titles | Sort-Object) -join ", "
@@ -318,11 +322,15 @@ function Get-RequiredList {
   }
 
   if ($null -eq $list) {
-    foreach ($candidate in $Web.Lists) {
-      if ($candidate.Title -ieq $ListTitle) {
-        $list = $candidate
-        break
+    try {
+      foreach ($candidate in $Web.Lists) {
+        if ($candidate.Title -ieq $ListTitle) {
+          $list = $candidate
+          break
+        }
       }
+    } catch {
+      throw ("Could not access {0} named '{1}' in site '{2}'. Current Windows identity '{3}' received access denied while reading lists. Grant this account SharePoint site/list permission and SPShellAdmin access to the content database. Original error: {4}" -f $Purpose, $ListTitle, $Web.Url, [System.Security.Principal.WindowsIdentity]::GetCurrent().Name, $_.Exception.Message)
     }
   }
 
