@@ -288,6 +288,52 @@ function Set-SharedFolderPathIfNeeded {
   }
 }
 
+function Get-AvailableListTitles {
+  param([Microsoft.SharePoint.SPWeb]$Web)
+
+  $titles = @()
+
+  foreach ($list in $Web.Lists) {
+    if (-not $list.Hidden) {
+      $titles += [string]$list.Title
+    }
+  }
+
+  return ($titles | Sort-Object) -join ", "
+}
+
+function Get-RequiredList {
+  param(
+    [Microsoft.SharePoint.SPWeb]$Web,
+    [string]$ListTitle,
+    [string]$Purpose
+  )
+
+  $list = $null
+
+  try {
+    $list = $Web.Lists.TryGetList($ListTitle)
+  } catch {
+    $list = $null
+  }
+
+  if ($null -eq $list) {
+    foreach ($candidate in $Web.Lists) {
+      if ($candidate.Title -ieq $ListTitle) {
+        $list = $candidate
+        break
+      }
+    }
+  }
+
+  if ($null -eq $list) {
+    $availableLists = Get-AvailableListTitles $Web
+    throw ("Could not find {0} named '{1}' in site '{2}'. Available visible lists/libraries: {3}" -f $Purpose, $ListTitle, $Web.Url, $availableLists)
+  }
+
+  return $list
+}
+
 function Sync-RequestFiles {
   param(
     [Microsoft.SharePoint.SPListItem]$Item,
@@ -338,8 +384,8 @@ function Invoke-GMApprovalFileSync {
 
   try {
     $web = Get-SPWeb $SiteUrl
-    $requests = $web.Lists[$RequestsListName]
-    $library = $web.Lists[$DocumentsLibraryName]
+    $requests = Get-RequiredList $web $RequestsListName "requests list"
+    $library = Get-RequiredList $web $DocumentsLibraryName "documents library"
 
     $query = New-Object Microsoft.SharePoint.SPQuery
     $query.ViewAttributes = "Scope='RecursiveAll'"
