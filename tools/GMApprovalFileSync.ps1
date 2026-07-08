@@ -391,6 +391,8 @@ function Invoke-GMApprovalFileSync {
   $web = $null
 
   try {
+    Write-GeneralLog ("Sync started as {0}" -f [System.Security.Principal.WindowsIdentity]::GetCurrent().Name)
+
     $web = Get-SPWeb $SiteUrl
     $requests = Get-RequiredList $web $RequestsListName "requests list"
     $library = Get-RequiredList $web $DocumentsLibraryName "documents library"
