@@ -52,6 +52,27 @@ function Write-RequestLog {
   Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
 }
 
+function Write-RequestLogBlock {
+  param(
+    [string]$RequestNo,
+    [string[]]$Lines
+  )
+
+  $safeRequestNo = Get-SafeFileName $RequestNo
+  $logPath = Join-Path $logsPath ($safeRequestNo + ".log")
+  Add-Content -LiteralPath $logPath -Value $Lines -Encoding UTF8
+}
+
+function Format-AuditValue {
+  param([string]$Value)
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return "[blank]"
+  }
+
+  return $Value
+}
+
 function Convert-StateToHashtable {
   param($JsonObject)
 
@@ -138,6 +159,24 @@ function Get-UserFieldString {
   return [string]$value
 }
 
+function Get-AuditFieldDefinitions {
+  return @(
+    @{ Name = "Title"; Label = "Title"; IsComment = $false },
+    @{ Name = "RequestDate"; Label = "Request Date"; IsComment = $false },
+    @{ Name = "Department"; Label = "Department"; IsComment = $false },
+    @{ Name = "RequestDetails"; Label = "Request Details"; IsComment = $false },
+    @{ Name = "Status"; Label = "Status"; IsComment = $false },
+    @{ Name = "OfficeManagerComment"; Label = "Office Manager Comment"; IsComment = $true },
+    @{ Name = "HODComment"; Label = "HOD Comment"; IsComment = $true },
+    @{ Name = "GMComment"; Label = "GM Comment"; IsComment = $true },
+    @{ Name = "SharedFolderPath"; Label = "Shared Folder Path"; IsComment = $false },
+    @{ Name = "PDFFileUrl"; Label = "PDF File URL"; IsComment = $false },
+    @{ Name = "SignedPDFUrl"; Label = "Signed PDF URL"; IsComment = $false },
+    @{ Name = "GMApprovalDetected"; Label = "GM Approval Detected"; IsComment = $false },
+    @{ Name = "GMApprovalConfirmed"; Label = "GM Approval Confirmed"; IsComment = $false }
+  )
+}
+
 function Get-ItemSnapshot {
   param([Microsoft.SharePoint.SPListItem]$Item)
 
@@ -145,6 +184,9 @@ function Get-ItemSnapshot {
     Id = [string]$Item.ID
     Title = Get-FieldString $Item "Title"
     RequestNo = Get-FieldString $Item "RequestNo"
+    RequestDate = Get-FieldString $Item "RequestDate"
+    Department = Get-FieldString $Item "Department"
+    RequestDetails = Get-FieldString $Item "RequestDetails"
     Status = Get-FieldString $Item "Status"
     OfficeManagerComment = Get-FieldString $Item "OfficeManagerComment"
     HODComment = Get-FieldString $Item "HODComment"
@@ -152,6 +194,10 @@ function Get-ItemSnapshot {
     SharedFolderPath = Get-FieldString $Item "SharedFolderPath"
     PDFFileUrl = Get-FieldString $Item "PDFFileUrl"
     SignedPDFUrl = Get-FieldString $Item "SignedPDFUrl"
+    GMApprovalDetected = Get-FieldString $Item "GMApprovalDetected"
+    GMApprovalConfirmed = Get-FieldString $Item "GMApprovalConfirmed"
+    Created = ([datetime]$Item["Created"]).ToString("o")
+    CreatedBy = Get-UserFieldString $Item "Author"
     Modified = ([datetime]$Item["Modified"]).ToString("o")
     ModifiedBy = Get-UserFieldString $Item "Editor"
   }
@@ -164,30 +210,80 @@ function Write-ChangeLog {
     [hashtable]$Current
   )
 
+  $now = Get-Date
+  $auditFields = Get-AuditFieldDefinitions
+  $changedFields = @()
+
   if ($null -eq $Previous) {
-    Write-RequestLog $RequestNo ("Tracking started. Status={0}; ModifiedBy={1}" -f $Current.Status, $Current.ModifiedBy)
+    $lines = @(
+      "================================================",
+      ("Audit event : Request tracking started"),
+      ("Audit time  : {0}" -f $now.ToString("yyyy-MM-dd HH:mm:ss")),
+      ("Request ID  : {0}" -f $Current.Id),
+      ("Request No  : {0}" -f (Format-AuditValue $Current.RequestNo)),
+      ("Created     : {0}" -f (Format-AuditValue $Current.Created)),
+      ("Created By  : {0}" -f (Format-AuditValue $Current.CreatedBy)),
+      ("Modified    : {0}" -f (Format-AuditValue $Current.Modified)),
+      ("Modified By : {0}" -f (Format-AuditValue $Current.ModifiedBy)),
+      "------------------------------------------------"
+    )
+
+    foreach ($field in $auditFields) {
+      $fieldName = $field.Name
+      $label = $field.Label
+      $lines += ("{0} : {1}" -f $label, (Format-AuditValue $Current[$fieldName]))
+    }
+
+    $lines += ""
+    Write-RequestLogBlock $RequestNo $lines
     return
   }
 
-  $fieldsToLog = @(
-    "Title",
-    "Status",
-    "OfficeManagerComment",
-    "HODComment",
-    "GMComment",
-    "SharedFolderPath",
-    "PDFFileUrl",
-    "SignedPDFUrl"
-  )
-
-  foreach ($fieldName in $fieldsToLog) {
+  foreach ($field in $auditFields) {
+    $fieldName = $field.Name
     $oldValue = [string]$Previous[$fieldName]
     $newValue = [string]$Current[$fieldName]
 
     if ($oldValue -ne $newValue) {
-      Write-RequestLog $RequestNo ("{0} changed by {1}`r`nOLD: {2}`r`nNEW: {3}" -f $fieldName, $Current.ModifiedBy, $oldValue, $newValue)
+      $changedFields += $field
     }
   }
+
+  if ($changedFields.Count -eq 0) {
+    return
+  }
+
+  $lines = @(
+    "================================================",
+    ("Audit event : Request changed"),
+    ("Audit time  : {0}" -f $now.ToString("yyyy-MM-dd HH:mm:ss")),
+    ("Request ID  : {0}" -f $Current.Id),
+    ("Request No  : {0}" -f (Format-AuditValue $Current.RequestNo)),
+    ("Modified    : {0}" -f (Format-AuditValue $Current.Modified)),
+    ("Modified By : {0}" -f (Format-AuditValue $Current.ModifiedBy)),
+    "------------------------------------------------"
+  )
+
+  foreach ($field in $changedFields) {
+    $fieldName = $field.Name
+    $label = $field.Label
+    $oldValue = Format-AuditValue ([string]$Previous[$fieldName])
+    $newValue = Format-AuditValue ([string]$Current[$fieldName])
+
+    if ($field.IsComment) {
+      $lines += ("{0} version" -f $label)
+      $lines += ("{0} : {1}" -f $label, $oldValue)
+      $lines += ("{0} changed to : {1}" -f $label, $newValue)
+    } else {
+      $lines += ("{0} : {1}" -f $label, $oldValue)
+      $lines += ("{0} changed to : {1}" -f $label, $newValue)
+    }
+
+    $lines += "."
+  }
+
+  $lines += ""
+  Write-RequestLogBlock $RequestNo $lines
 }
 
 function Get-RequestPdfFile {
