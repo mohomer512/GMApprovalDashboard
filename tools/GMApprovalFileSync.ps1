@@ -3,7 +3,12 @@ param(
   [string]$RequestsListName = "GM Requests",
   [string]$DocumentsLibraryName = "GM Approval Documents",
   [string]$ShareRootPath = "C:\GMApprovalShare",
-  [string]$ShareUncRoot = "\\SPSE26H\GMApprovalShare"
+  [string]$ShareUncRoot = "\\SPSE26H\GMApprovalShare",
+  [ValidateRange(0, 86400)]
+  [int]$PollSeconds = 0,
+  [ValidateRange(0, 300)]
+  [int]$SignedFileStableSeconds = 5,
+  [switch]$SkipExecution
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,6 +76,283 @@ function Format-AuditValue {
   }
 
   return $Value
+}
+
+function Add-CommentAuditBlock {
+  param(
+    [string]$RequestNo,
+    [hashtable]$Previous,
+    [hashtable]$Current
+  )
+
+  if ([string]::IsNullOrWhiteSpace($RequestNo)) {
+    return $false
+  }
+
+  $safeRequestNo = Get-SafeFileName $RequestNo
+  $commentLogPath = Join-Path $logsPath ($safeRequestNo + "-Comments.log")
+  $commentFields = @(
+    @{ Name = "OfficeManagerComment"; Label = "Office Manager Comment" },
+    @{ Name = "HODComment"; Label = "HOD Comment" },
+    @{ Name = "GMComment"; Label = "GM Comment" }
+  )
+  $lines = @()
+
+  if (-not (Test-Path -LiteralPath $commentLogPath)) {
+    $lines = @(
+      "================================================",
+      "Comment audit started",
+      ("Audit time  : {0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")),
+      ("Request ID  : {0}" -f $Current.Id),
+      ("Request No  : {0}" -f (Format-AuditValue $Current.RequestNo)),
+      ("Modified By : {0}" -f (Format-AuditValue $Current.ModifiedBy)),
+      "------------------------------------------------"
+    )
+
+    foreach ($field in $commentFields) {
+      $lines += ("{0} : {1}" -f $field.Label, (Format-AuditValue ([string]$Current[$field.Name])))
+      $lines += "."
+    }
+  } elseif ($null -ne $Previous) {
+    $changedCommentFields = @()
+
+    foreach ($field in $commentFields) {
+      if ([string]$Previous[$field.Name] -ne [string]$Current[$field.Name]) {
+        $changedCommentFields += $field
+      }
+    }
+
+    if ($changedCommentFields.Count -gt 0) {
+      $lines = @(
+        "================================================",
+        "Comment version changed",
+        ("Audit time  : {0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")),
+        ("Request ID  : {0}" -f $Current.Id),
+        ("Request No  : {0}" -f (Format-AuditValue $Current.RequestNo)),
+        ("Modified By : {0}" -f (Format-AuditValue $Current.ModifiedBy)),
+        "------------------------------------------------"
+      )
+
+      foreach ($field in $changedCommentFields) {
+        $lines += ("{0} : {1}" -f $field.Label, (Format-AuditValue ([string]$Previous[$field.Name])))
+        $lines += ("{0} changed to : {1}" -f $field.Label, (Format-AuditValue ([string]$Current[$field.Name])))
+        $lines += "."
+      }
+    }
+  }
+
+  if ($lines.Count -eq 0) {
+    return $false
+  }
+
+  $lines += ""
+  Add-Content -LiteralPath $commentLogPath -Value $lines -Encoding UTF8
+  return $true
+}
+
+function Write-AsciiBytes {
+  param(
+    [System.IO.Stream]$Stream,
+    [string]$Value
+  )
+
+  $bytes = [System.Text.Encoding]::ASCII.GetBytes($Value)
+  $Stream.Write($bytes, 0, $bytes.Length)
+}
+
+function Get-WrappedPdfLines {
+  param(
+    [System.Drawing.Graphics]$Graphics,
+    [System.Drawing.Font]$Font,
+    [string[]]$SourceLines,
+    [float]$MaximumWidth
+  )
+
+  $wrappedLines = New-Object System.Collections.ArrayList
+
+  foreach ($sourceLine in $SourceLines) {
+    if ([string]::IsNullOrWhiteSpace($sourceLine)) {
+      [void]$wrappedLines.Add("")
+      continue
+    }
+
+    $words = $sourceLine -split "\s+"
+    $currentLine = ""
+
+    foreach ($word in $words) {
+      $candidate = if ([string]::IsNullOrEmpty($currentLine)) { $word } else { $currentLine + " " + $word }
+      $candidateWidth = $Graphics.MeasureString($candidate, $Font).Width
+
+      if ($candidateWidth -le $MaximumWidth -or [string]::IsNullOrEmpty($currentLine)) {
+        $currentLine = $candidate
+      } else {
+        [void]$wrappedLines.Add($currentLine)
+        $currentLine = $word
+      }
+    }
+
+    if (-not [string]::IsNullOrEmpty($currentLine)) {
+      [void]$wrappedLines.Add($currentLine)
+    }
+  }
+
+  return ,$wrappedLines.ToArray()
+}
+
+function New-ImagePdf {
+  param(
+    [string[]]$Lines,
+    [string]$Title,
+    [string]$OutputPath
+  )
+
+  Add-Type -AssemblyName System.Drawing
+
+  $pageWidth = 1240
+  $pageHeight = 1754
+  $margin = 85
+  $lineHeight = 34
+  $bodyTop = 180
+  $bodyBottom = $pageHeight - 80
+  $linesPerPage = [math]::Floor(($bodyBottom - $bodyTop) / $lineHeight)
+  $measureBitmap = New-Object System.Drawing.Bitmap 1, 1
+  $measureGraphics = [System.Drawing.Graphics]::FromImage($measureBitmap)
+  $bodyFont = New-Object System.Drawing.Font "Arial", 20, ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)
+  $titleFont = New-Object System.Drawing.Font "Arial", 30, ([System.Drawing.FontStyle]::Bold), ([System.Drawing.GraphicsUnit]::Pixel)
+  $metaFont = New-Object System.Drawing.Font "Arial", 16, ([System.Drawing.FontStyle]::Regular), ([System.Drawing.GraphicsUnit]::Pixel)
+  $jpegPages = New-Object System.Collections.ArrayList
+
+  try {
+    $wrappedLines = Get-WrappedPdfLines $measureGraphics $bodyFont $Lines ($pageWidth - (2 * $margin))
+
+    if ($wrappedLines.Count -eq 0) {
+      $wrappedLines = @("No comments have been recorded.")
+    }
+
+    $pageCount = [math]::Ceiling($wrappedLines.Count / $linesPerPage)
+
+    for ($pageIndex = 0; $pageIndex -lt $pageCount; $pageIndex++) {
+      $bitmap = New-Object System.Drawing.Bitmap $pageWidth, $pageHeight
+      $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+      $memoryStream = New-Object System.IO.MemoryStream
+
+      try {
+        $graphics.Clear([System.Drawing.Color]::White)
+        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+        $graphics.DrawString($Title, $titleFont, [System.Drawing.Brushes]::Black, [float]$margin, [float]65)
+        $pageLabel = "Generated {0} | Page {1} of {2}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss"), ($pageIndex + 1), $pageCount
+        $graphics.DrawString($pageLabel, $metaFont, [System.Drawing.Brushes]::DimGray, [float]$margin, [float]115)
+
+        $startIndex = $pageIndex * $linesPerPage
+        $endIndex = [math]::Min($startIndex + $linesPerPage, $wrappedLines.Count)
+        $y = $bodyTop
+
+        for ($lineIndex = $startIndex; $lineIndex -lt $endIndex; $lineIndex++) {
+          $graphics.DrawString([string]$wrappedLines[$lineIndex], $bodyFont, [System.Drawing.Brushes]::Black, [float]$margin, [float]$y)
+          $y += $lineHeight
+        }
+
+        $bitmap.Save($memoryStream, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+        [void]$jpegPages.Add($memoryStream.ToArray())
+      } finally {
+        $memoryStream.Dispose()
+        $graphics.Dispose()
+        $bitmap.Dispose()
+      }
+    }
+  } finally {
+    $metaFont.Dispose()
+    $titleFont.Dispose()
+    $bodyFont.Dispose()
+    $measureGraphics.Dispose()
+    $measureBitmap.Dispose()
+  }
+
+  $pdfStream = New-Object System.IO.MemoryStream
+
+  try {
+    Write-AsciiBytes $pdfStream "%PDF-1.4`n"
+    $objectCount = 2 + ($jpegPages.Count * 3)
+    $offsets = New-Object long[] ($objectCount + 1)
+
+    for ($objectId = 1; $objectId -le $objectCount; $objectId++) {
+      $offsets[$objectId] = $pdfStream.Position
+      Write-AsciiBytes $pdfStream ("{0} 0 obj`n" -f $objectId)
+
+      if ($objectId -eq 1) {
+        Write-AsciiBytes $pdfStream "<< /Type /Catalog /Pages 2 0 R >>`n"
+      } elseif ($objectId -eq 2) {
+        $kids = @()
+        for ($pageIndex = 0; $pageIndex -lt $jpegPages.Count; $pageIndex++) {
+          $kids += ("{0} 0 R" -f (3 + ($pageIndex * 3)))
+        }
+        Write-AsciiBytes $pdfStream ("<< /Type /Pages /Count {0} /Kids [ {1} ] >>`n" -f $jpegPages.Count, ($kids -join " "))
+      } else {
+        $relativeId = $objectId - 3
+        $pageIndex = [math]::Floor($relativeId / 3)
+        $objectType = $relativeId % 3
+        $pageObjectId = 3 + ($pageIndex * 3)
+        $imageObjectId = $pageObjectId + 1
+        $contentObjectId = $pageObjectId + 2
+
+        if ($objectType -eq 0) {
+          Write-AsciiBytes $pdfStream ("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 {0} 0 R >> >> /Contents {1} 0 R >>`n" -f $imageObjectId, $contentObjectId)
+        } elseif ($objectType -eq 1) {
+          $imageBytes = [byte[]]$jpegPages[$pageIndex]
+          Write-AsciiBytes $pdfStream ("<< /Type /XObject /Subtype /Image /Width {0} /Height {1} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {2} >>`nstream`n" -f $pageWidth, $pageHeight, $imageBytes.Length)
+          $pdfStream.Write($imageBytes, 0, $imageBytes.Length)
+          Write-AsciiBytes $pdfStream "`nendstream`n"
+        } else {
+          $content = "q 595 0 0 842 0 0 cm /Im1 Do Q"
+          Write-AsciiBytes $pdfStream ("<< /Length {0} >>`nstream`n{1}`nendstream`n" -f $content.Length, $content)
+        }
+      }
+
+      Write-AsciiBytes $pdfStream "endobj`n"
+    }
+
+    $xrefOffset = $pdfStream.Position
+    Write-AsciiBytes $pdfStream ("xref`n0 {0}`n" -f ($objectCount + 1))
+    Write-AsciiBytes $pdfStream "0000000000 65535 f `n"
+
+    for ($objectId = 1; $objectId -le $objectCount; $objectId++) {
+      Write-AsciiBytes $pdfStream ("{0:D10} 00000 n `n" -f $offsets[$objectId])
+    }
+
+    Write-AsciiBytes $pdfStream ("trailer`n<< /Size {0} /Root 1 0 R >>`nstartxref`n{1}`n%%EOF" -f ($objectCount + 1), $xrefOffset)
+    [System.IO.File]::WriteAllBytes($OutputPath, $pdfStream.ToArray())
+  } finally {
+    $pdfStream.Dispose()
+  }
+}
+
+function Update-CommentAuditPdf {
+  param(
+    [string]$RequestNo,
+    [bool]$CommentLogChanged
+  )
+
+  if ([string]::IsNullOrWhiteSpace($RequestNo)) {
+    return
+  }
+
+  $safeRequestNo = Get-SafeFileName $RequestNo
+  $commentLogPath = Join-Path $logsPath ($safeRequestNo + "-Comments.log")
+  $commentPdfPath = Join-Path $logsPath ($safeRequestNo + "-Comments.pdf")
+
+  if (-not (Test-Path -LiteralPath $commentLogPath)) {
+    return
+  }
+
+  if ($CommentLogChanged -or -not (Test-Path -LiteralPath $commentPdfPath)) {
+    try {
+      $commentLines = Get-Content -LiteralPath $commentLogPath -Encoding UTF8
+      New-ImagePdf $commentLines ("GM Approval Comments - " + $RequestNo) $commentPdfPath
+      Write-RequestLog $RequestNo ("Comments audit PDF updated: {0}" -f $commentPdfPath)
+    } catch {
+      Write-RequestLog $RequestNo ("Comments audit PDF could not be updated: {0}" -f $_.Exception.Message)
+    }
+  }
 }
 
 function Convert-StateToHashtable {
@@ -209,6 +491,9 @@ function Write-ChangeLog {
     [hashtable]$Previous,
     [hashtable]$Current
   )
+
+  $commentLogChanged = Add-CommentAuditBlock $RequestNo $Previous $Current
+  Update-CommentAuditPdf $RequestNo $commentLogChanged
 
   $now = Get-Date
   $auditFields = Get-AuditFieldDefinitions
@@ -368,6 +653,131 @@ function Copy-LocalFileIfMissing {
   Write-RequestLog $RequestNo ("{0}: {1}" -f $ActionName, $DestinationPath)
 }
 
+function Move-LocalFileReplacingDestination {
+  param(
+    [string]$SourcePath,
+    [string]$DestinationPath
+  )
+
+  if (Test-Path -LiteralPath $DestinationPath) {
+    Remove-Item -LiteralPath $DestinationPath -Force
+  }
+
+  Move-Item -LiteralPath $SourcePath -Destination $DestinationPath
+}
+
+function Get-FileContentHash {
+  param(
+    [string]$Path,
+    [string]$RequestNo
+  )
+
+  try {
+    $stream = [System.IO.File]::Open(
+      $Path,
+      [System.IO.FileMode]::Open,
+      [System.IO.FileAccess]::Read,
+      [System.IO.FileShare]::ReadWrite
+    )
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+
+    try {
+      $hashBytes = $sha256.ComputeHash($stream)
+      return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "")
+    } finally {
+      $sha256.Dispose()
+      $stream.Dispose()
+    }
+  } catch {
+    Write-RequestLog $RequestNo ("Could not read PDF for signature detection: {0}" -f $_.Exception.Message)
+    return ""
+  }
+}
+
+function Get-SharePointFileContentHash {
+  param(
+    [Microsoft.SharePoint.SPFile]$File,
+    [string]$RequestNo
+  )
+
+  if ($null -eq $File) {
+    Write-RequestLog $RequestNo "Could not compare the Pending PDF because the SharePoint library file was not found."
+    return ""
+  }
+
+  try {
+    $fileBytes = $File.OpenBinary()
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+
+    try {
+      $hashBytes = $sha256.ComputeHash($fileBytes)
+      return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "")
+    } finally {
+      $sha256.Dispose()
+    }
+  } catch {
+    Write-RequestLog $RequestNo ("Could not read the SharePoint PDF for signature detection: {0}" -f $_.Exception.Message)
+    return ""
+  }
+}
+
+function Set-RequestPdfUrls {
+  param(
+    [Microsoft.SharePoint.SPListItem]$Item,
+    [string]$RequestNo,
+    [string]$PdfUrl
+  )
+
+  try {
+    $pdfUrlValue = New-Object Microsoft.SharePoint.SPFieldUrlValue
+    $pdfUrlValue.Url = $PdfUrl
+    $pdfUrlValue.Description = $RequestNo + " signed PDF"
+
+    $signedUrlValue = New-Object Microsoft.SharePoint.SPFieldUrlValue
+    $signedUrlValue.Url = $PdfUrl
+    $signedUrlValue.Description = $RequestNo + " signed PDF"
+
+    $Item["PDFFileUrl"] = $pdfUrlValue
+    $Item["SignedPDFUrl"] = $signedUrlValue
+    $Item.Update()
+  } catch {
+    Write-RequestLog $RequestNo ("The edited SharePoint PDF was published, but its URL fields could not be updated: {0}" -f $_.Exception.Message)
+  }
+}
+
+function Confirm-GmSignedPdf {
+  param(
+    [Microsoft.SharePoint.SPListItem]$Item,
+    [Microsoft.SharePoint.SPFile]$SharePointFile,
+    [string]$RequestNo,
+    [string]$PendingFilePath,
+    [string]$SignedFilePath,
+    [hashtable]$Snapshot
+  )
+
+  if ($null -eq $SharePointFile) {
+    throw ("Cannot publish the signed PDF for {0}. The SharePoint library file was not found." -f $RequestNo)
+  }
+
+  $signedPdfUrl = $Item.Web.Site.Url.TrimEnd("/") + "/" + $SharePointFile.ServerRelativeUrl.TrimStart("/")
+
+  $Item["Status"] = "GM Signed Pending Office Manager Confirmation"
+  $Item["GMApprovalDetected"] = $true
+  $Item["SharedFolderPath"] = (($ShareUncRoot.TrimEnd("\")) + "\Signed\" + $RequestNo + ".pdf")
+  $Item.Update()
+
+  $signedBytes = [System.IO.File]::ReadAllBytes($PendingFilePath)
+  $SharePointFile.SaveBinary($signedBytes)
+  Set-RequestPdfUrls $Item $RequestNo $signedPdfUrl
+  Move-LocalFileReplacingDestination $PendingFilePath $SignedFilePath
+  Write-RequestLog $RequestNo ("GM signature file change confirmed. Edited PDF moved from Pending to Signed: {0}" -f $SignedFilePath)
+  Write-RequestLog $RequestNo ("Edited PDF published to SharePoint: {0}" -f $signedPdfUrl)
+  Write-RequestLog $RequestNo "SharePoint status changed to GM Signed Pending Office Manager Confirmation."
+
+  $Snapshot["PendingSignatureConfirmed"] = "true"
+  $Snapshot["PendingCandidateHash"] = ""
+}
+
 function Set-SharedFolderPathIfNeeded {
   param(
     [Microsoft.SharePoint.SPListItem]$Item,
@@ -442,7 +852,8 @@ function Sync-RequestFiles {
   param(
     [Microsoft.SharePoint.SPListItem]$Item,
     [Microsoft.SharePoint.SPList]$Library,
-    [hashtable]$Snapshot
+    [hashtable]$Snapshot,
+    [hashtable]$Previous
   )
 
   $requestNo = $Snapshot.RequestNo
@@ -460,11 +871,66 @@ function Sync-RequestFiles {
   if ($status -eq "Pending GM Signature") {
     Copy-SPFileIfMissing $pdfFile $pendingFilePath $requestNo "Copied PDF to Pending"
     Set-SharedFolderPathIfNeeded $Item (($ShareUncRoot.TrimEnd("\")) + "\Pending\" + $requestNo + ".pdf") $requestNo
+
+    if (-not (Test-Path -LiteralPath $pendingFilePath)) {
+      return
+    }
+
+    $currentHash = Get-FileContentHash $pendingFilePath $requestNo
+
+    if ([string]::IsNullOrWhiteSpace($currentHash)) {
+      return
+    }
+
+    $sharePointHash = Get-SharePointFileContentHash $pdfFile $requestNo
+
+    if ([string]::IsNullOrWhiteSpace($sharePointHash)) {
+      return
+    }
+
+    $previousBaselineHash = ""
+
+    if ($null -ne $Previous) {
+      $previousBaselineHash = [string]$Previous["PendingBaselineHash"]
+    }
+
+    if ($currentHash -eq $sharePointHash -and
+        ([string]::IsNullOrWhiteSpace($previousBaselineHash) -or $currentHash -eq $previousBaselineHash)) {
+      $Snapshot["PendingBaselineHash"] = $sharePointHash
+      return
+    }
+
+    $lastWriteUtc = [System.IO.File]::GetLastWriteTimeUtc($pendingFilePath)
+    $stableAgeSeconds = ([datetime]::UtcNow - $lastWriteUtc).TotalSeconds
+
+    if ($stableAgeSeconds -lt $SignedFileStableSeconds) {
+      Write-RequestLog $requestNo ("Edited Pending PDF detected, but it is only {0:N1} seconds old. Waiting until it is stable for {1} seconds." -f $stableAgeSeconds, $SignedFileStableSeconds)
+      return
+    }
+
+    Confirm-GmSignedPdf $Item $pdfFile $requestNo $pendingFilePath $signedFilePath $Snapshot
     return
   }
 
   if ($status -eq "GM Signed Pending Office Manager Confirmation" -or $status -eq "Approved by GM") {
-    Copy-LocalFileIfMissing $pendingFilePath $signedFilePath $requestNo "Copied PDF to Signed"
+    if (Test-Path -LiteralPath $pendingFilePath) {
+      if ($null -eq $pdfFile) {
+        throw ("Cannot finish moving the signed PDF for {0}. The SharePoint library file was not found." -f $requestNo)
+      }
+
+      $signedBytes = [System.IO.File]::ReadAllBytes($pendingFilePath)
+      $pdfFile.SaveBinary($signedBytes)
+
+      $signedPdfUrl = $Item.Web.Site.Url.TrimEnd("/") + "/" + $pdfFile.ServerRelativeUrl.TrimStart("/")
+      $Item["SharedFolderPath"] = (($ShareUncRoot.TrimEnd("\")) + "\Signed\" + $requestNo + ".pdf")
+      $Item.Update()
+      Set-RequestPdfUrls $Item $requestNo $signedPdfUrl
+
+      Move-LocalFileReplacingDestination $pendingFilePath $signedFilePath
+      Write-RequestLog $requestNo ("Moved remaining Pending PDF to Signed: {0}" -f $signedFilePath)
+      Write-RequestLog $requestNo ("Edited PDF published to SharePoint: {0}" -f $signedPdfUrl)
+    }
+
     Set-SharedFolderPathIfNeeded $Item (($ShareUncRoot.TrimEnd("\")) + "\Signed\" + $requestNo + ".pdf") $requestNo
     return
   }
@@ -509,7 +975,7 @@ function Invoke-GMApprovalFileSync {
       }
 
       Write-ChangeLog $snapshot.RequestNo $previous $snapshot
-      Sync-RequestFiles $item $library $snapshot
+      Sync-RequestFiles $item $library $snapshot $previous
       $state[$key] = $snapshot
     }
 
@@ -525,12 +991,34 @@ function Invoke-GMApprovalFileSync {
   }
 }
 
-Invoke-GMApprovalFileSync
+if (-not $SkipExecution) {
+  do {
+    try {
+      Invoke-GMApprovalFileSync
+    } catch {
+      if ($PollSeconds -le 0) {
+        throw
+      }
+    }
+
+    if ($PollSeconds -le 0) {
+      break
+    }
+
+    Start-Sleep -Seconds $PollSeconds
+  } while ($true)
+}
 
 <# 
-Suggested scheduled task command, run once as Administrator on the SharePoint server:
+Suggested continuous 10-second scheduled task configuration.
+Run once as Administrator on the SharePoint server:
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\GMApprovalDashboard\tools\GMApprovalFileSync.ps1"
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 3650)
-Register-ScheduledTask -TaskName "GM Approval File Sync" -Action $action -Trigger $trigger -User "TEST\sp.gmservice" -RunLevel Highest
+$credential = Get-Credential "TEST\Administrator"
+$action = New-ScheduledTaskAction -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument '-NoProfile -ExecutionPolicy Bypass -File "C:\GMApprovalDashboard\tools\GMApprovalFileSync.ps1" -PollSeconds 10'
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+
+Stop-ScheduledTask -TaskName "GM Approval File Sync" -ErrorAction SilentlyContinue
+Set-ScheduledTask -TaskName "GM Approval File Sync" -Action $action -Trigger $trigger -Settings $settings -User $credential.UserName -Password $credential.GetNetworkCredential().Password
+Start-ScheduledTask -TaskName "GM Approval File Sync"
 #>
