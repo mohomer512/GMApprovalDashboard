@@ -582,7 +582,6 @@ function Get-RequestPdfFile {
 
   $query = New-Object Microsoft.SharePoint.SPQuery
   $query.ViewAttributes = "Scope='RecursiveAll'"
-  $query.RowLimit = 1
   $query.Query = @"
 <Where>
   <Or>
@@ -602,12 +601,34 @@ function Get-RequestPdfFile {
 "@
 
   $items = $Library.GetItems($query)
+  $legacyFile = $null
+  $fallbackFile = $null
 
-  if ($items.Count -gt 0 -and $null -ne $items[0].File) {
-    return $items[0].File
+  foreach ($libraryItem in $items) {
+    if ($null -eq $libraryItem.File) {
+      continue
+    }
+
+    if ($null -eq $fallbackFile) {
+      $fallbackFile = $libraryItem.File
+    }
+
+    $documentType = (Get-FieldString $libraryItem "DocumentType").Trim()
+
+    if ($documentType -ieq "Request PDF") {
+      return $libraryItem.File
+    }
+
+    if ($null -eq $legacyFile -and [string]::IsNullOrWhiteSpace($documentType)) {
+      $legacyFile = $libraryItem.File
+    }
   }
 
-  return $null
+  if ($null -ne $legacyFile) {
+    return $legacyFile
+  }
+
+  return $fallbackFile
 }
 
 function Copy-SPFileIfMissing {

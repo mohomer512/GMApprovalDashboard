@@ -15,6 +15,17 @@ The package is created here:
 C:\GMApprovalDashboard\sharepoint\solution\gm-approval-dashboard.sppkg
 ```
 
+## SharePoint prerequisites
+
+Before using PDF creation, verify these fields and permissions:
+
+- `GM Requests` has a plain-text multiple-lines field with internal name `PDFFileJson` and a hyperlink field named `PDFFileUrl`.
+- List attachments are enabled on `GM Requests`.
+- `GM Approval Documents` has `RequestNo` (text) and `RequestItemId` (number). If `DocumentType` is a Choice field, include both `Request PDF` and `Office Manager PDF`.
+- Office Managers have permission to create folders and upload/replace files in `GM Approval Documents`, and to update/attach files to `GM Requests`.
+
+The web part creates one library folder per request reference. It stores the supporting PDF and `OfficeManager(<request-reference>).pdf` in that folder. `PDFFileJson` uses schema version 2 with a `documents` collection; existing schema-version-1 records are read and upgraded automatically when the Office Manager PDF is saved.
+
 ## Deploy to SharePoint Server
 
 1. Open the SharePoint App Catalog site.

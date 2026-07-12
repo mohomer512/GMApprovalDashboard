@@ -17,6 +17,7 @@ export interface IRequestItem {
   HODComment: string;
   GMComment: string;
   PDFFileUrl: any;
+  PDFFileJson: string;
   SignedPDFUrl: any;
   SharedFolderPath: string;
   GMApprovalDetected: boolean;
@@ -55,9 +56,12 @@ export interface IGmApprovalDashboardState {
   officeManagerComment: string;
   hodComment: string;
   gmComment: string;
+  showOfficeManagerEditor: boolean;
 }
 
 interface IPdfUploadResult {
+  role: string;
+  documentType: string;
   fileName: string;
   originalFileName: string;
   contentType: string;
@@ -65,7 +69,19 @@ interface IPdfUploadResult {
   serverRelativeUrl: string;
   url: string;
   attachmentUrl: string;
-  json: string;
+}
+
+interface IPdfDocumentRecord {
+  role: string;
+  documentType: string;
+  fileName: string;
+  originalFileName: string;
+  contentType: string;
+  size: number;
+  uploadedAt: string;
+  libraryUrl: string;
+  serverRelativeUrl: string;
+  attachmentUrl: string;
 }
 
 interface ITranslatedText {
@@ -85,6 +101,8 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   private requestsListItemEntityTypeFullName: string = '';
   private documentsLibraryListItemEntityTypeFullName: string = '';
   private pdfFileInput: HTMLInputElement;
+  private officeManagerEditor: HTMLDivElement;
+  private officeManagerDocumentHtml: string = '';
   private besafeLogoUrl: string = require('../assets/besafe-logo.svg');
   private translations: { [key: string]: ITranslatedText } = {
     appTitle: { en: 'General Manager Approval Dashboard', ar: 'لوحة موافقات المدير العام' },
@@ -95,14 +113,20 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     loadingRequests: { en: 'Loading requests...', ar: 'جاري تحميل الطلبات...' },
     noAccess: { en: 'You are not a member of GM Secretaries, GM Office Managers, or GM HODs. Please contact SharePoint administrator.', ar: 'أنت لست عضوا في مجموعات سكرتارية المدير العام أو مديري مكتب المدير العام أو رؤساء الأقسام. يرجى التواصل مع مسؤول SharePoint.' },
     footer: { en: 'Besafe SharePoint Team', ar: 'فريق Besafe SharePoint' },
+    appSubtitle: { en: 'A clear, secure workspace for request review and approval', ar: 'مساحة عمل واضحة وآمنة لمراجعة الطلبات واعتمادها' },
 
     newRequest: { en: 'New Request', ar: 'طلب جديد' },
+    newRequestEyebrow: { en: 'Request workspace', ar: 'مساحة عمل الطلب' },
+    newRequestDescription: { en: 'Add the request information and supporting PDF, then choose the next approval step.', ar: 'أضف بيانات الطلب وملف PDF الداعم، ثم اختر خطوة الاعتماد التالية.' },
     title: { en: 'Title', ar: 'العنوان' },
     department: { en: 'Department', ar: 'القسم' },
     selectDepartment: { en: 'Select department', ar: 'اختر القسم' },
     requestDetails: { en: 'Request Details', ar: 'تفاصيل الطلب' },
     pdfAttachment: { en: 'PDF Attachment', ar: 'مرفق PDF' },
     pdfHelp: { en: 'Stored in GM Approval Documents and the request Attachments', ar: 'سيتم حفظه في مكتبة مستندات موافقات المدير العام ومرفقات الطلب' },
+    choosePdf: { en: 'Choose supporting PDF', ar: 'اختر ملف PDF الداعم' },
+    replacePdf: { en: 'Replace PDF', ar: 'استبدال ملف PDF' },
+    pdfFolderHelp: { en: 'The file will be stored inside the folder named with the request reference.', ar: 'سيتم حفظ الملف داخل مجلد يحمل رقم مرجع الطلب.' },
     submitToOfficeManager: { en: 'Submit to Office Manager', ar: 'إرسال إلى مدير المكتب' },
     submitting: { en: 'Submitting...', ar: 'جاري الإرسال...' },
     cancel: { en: 'Cancel', ar: 'إلغاء' },
@@ -122,6 +146,8 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     open: { en: 'Open', ar: 'فتح' },
 
     requestDetailsTitle: { en: 'Request Details', ar: 'تفاصيل الطلب' },
+    requestOverview: { en: 'Request overview', ar: 'نظرة عامة على الطلب' },
+    requestOverviewDescription: { en: 'Review the request, its documents, and the available workflow actions.', ar: 'راجع الطلب ومستنداته وإجراءات سير العمل المتاحة.' },
     id: { en: 'ID:', ar: 'المعرف:' },
     requestNoLabel: { en: 'Request No:', ar: 'رقم الطلب:' },
     titleLabel: { en: 'Title:', ar: 'العنوان:' },
@@ -133,10 +159,39 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     openPdf: { en: 'Open PDF', ar: 'فتح PDF' },
     signedPdf: { en: 'Signed PDF:', ar: 'ملف PDF الموقع:' },
     openSignedPdf: { en: 'Open Signed PDF', ar: 'فتح ملف PDF الموقع' },
+    documents: { en: 'Request documents', ar: 'مستندات الطلب' },
+    requestPdf: { en: 'Supporting PDF', ar: 'ملف PDF الداعم' },
+    officeManagerPdf: { en: 'Office Manager PDF', ar: 'ملف PDF الخاص بمدير المكتب' },
+    signedPdfDocument: { en: 'Signed PDF', ar: 'ملف PDF الموقع' },
+    storedInRequestFolder: { en: 'Stored in the request folder', ar: 'محفوظ داخل مجلد الطلب' },
+    openDocument: { en: 'Open document', ar: 'فتح المستند' },
+    noDocuments: { en: 'No PDF documents have been added yet.', ar: 'لم تتم إضافة مستندات PDF بعد.' },
     closeDetails: { en: 'Close Details', ar: 'إغلاق التفاصيل' },
 
     officeManagerActions: { en: 'Office Manager Actions', ar: 'إجراءات مدير المكتب' },
+    officeManagerWorkspace: { en: 'Office Manager workspace', ar: 'مساحة عمل مدير المكتب' },
+    officeManagerWorkspaceDescription: { en: 'Prepare the Office Manager document, add your comment, and route the request.', ar: 'جهّز مستند مدير المكتب، وأضف تعليقك، ثم وجّه الطلب.' },
     officeManagerComment: { en: 'Office Manager Comment', ar: 'تعليق مدير المكتب' },
+    officeManagerDocument: { en: 'Office Manager document', ar: 'مستند مدير المكتب' },
+    officeManagerDocumentDescription: { en: 'Create a formatted document in a familiar Word-style editor and attach it as PDF.', ar: 'أنشئ مستنداً منسقاً في محرر يشبه Word وأرفقه بصيغة PDF.' },
+    createOfficeManagerDocument: { en: 'Create Office Manager PDF', ar: 'إنشاء ملف PDF لمدير المكتب' },
+    editOfficeManagerDocument: { en: 'Create replacement Office Manager PDF', ar: 'إنشاء ملف PDF بديل لمدير المكتب' },
+    editorTitle: { en: 'Office Manager document editor', ar: 'محرر مستند مدير المكتب' },
+    editorSubtitle: { en: 'Format the page, then create and attach the final PDF.', ar: 'نسّق الصفحة، ثم أنشئ ملف PDF النهائي وأرفقه.' },
+    paragraph: { en: 'Paragraph', ar: 'فقرة' },
+    heading: { en: 'Heading', ar: 'عنوان' },
+    bold: { en: 'Bold', ar: 'عريض' },
+    italic: { en: 'Italic', ar: 'مائل' },
+    underline: { en: 'Underline', ar: 'تحته خط' },
+    bullets: { en: 'Bullets', ar: 'تعداد نقطي' },
+    alignLeft: { en: 'Align left', ar: 'محاذاة لليسار' },
+    alignCenter: { en: 'Align center', ar: 'توسيط' },
+    alignRight: { en: 'Align right', ar: 'محاذاة لليمين' },
+    undo: { en: 'Undo', ar: 'تراجع' },
+    redo: { en: 'Redo', ar: 'إعادة' },
+    createAttachPdf: { en: 'Create & attach PDF', ar: 'إنشاء وإرفاق PDF' },
+    generatingPdf: { en: 'Creating and uploading PDF...', ar: 'جاري إنشاء ملف PDF ورفعه...' },
+    closeEditor: { en: 'Close editor', ar: 'إغلاق المحرر' },
     hodComment: { en: 'HOD Comment', ar: 'تعليق رئيس القسم' },
     gmCommentNotes: { en: 'GM Comment / Notes', ar: 'تعليق / ملاحظات المدير العام' },
     putOnHold: { en: 'Put On Hold', ar: 'تعليق الطلب' },
@@ -159,6 +214,9 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     errorLibraryMetadata: { en: 'Document library metadata update failed. {0}', ar: 'فشل تحديث بيانات مكتبة المستندات. {0}' },
     errorListAttachment: { en: 'Request list attachment upload failed. {0}', ar: 'فشل رفع المرفق إلى قائمة الطلبات. {0}' },
     errorDocumentsLibraryMissing: { en: 'Could not find the GM Approval Documents library. {0}', ar: 'تعذر العثور على مكتبة مستندات موافقات المدير العام. {0}' },
+    errorRequestFolder: { en: 'Could not create or open the request document folder. {0}', ar: 'تعذر إنشاء مجلد مستندات الطلب أو فتحه. {0}' },
+    errorOfficeManagerPdf: { en: 'The Office Manager PDF could not be created or attached. {0}', ar: 'تعذر إنشاء ملف PDF الخاص بمدير المكتب أو إرفاقه. {0}' },
+    errorEditorUnavailable: { en: 'The document editor is not available. Close it and try again.', ar: 'محرر المستند غير متاح. أغلقه ثم حاول مرة أخرى.' },
     messageUploadingPdf: { en: 'Request created. Uploading PDF to the document library and list attachment...', ar: 'تم إنشاء الطلب. جاري رفع ملف PDF إلى مكتبة المستندات ومرفقات الطلب...' },
     messageCreated: { en: 'Request created successfully: {0}', ar: 'تم إنشاء الطلب بنجاح: {0}' },
     messagePdfStepFailed: { en: 'Request {0} was created, but the PDF step failed: ', ar: 'تم إنشاء الطلب {0}، ولكن فشلت خطوة PDF: ' },
@@ -166,6 +224,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     messageReturnedToOfficeManager: { en: 'Request returned to Office Manager.', ar: 'تم إرجاع الطلب إلى مدير المكتب.' },
     messageGmApprovalConfirmed: { en: 'GM approval confirmed.', ar: 'تم تأكيد موافقة المدير العام.' },
     messageRequestClosed: { en: 'Request closed.', ar: 'تم إغلاق الطلب.' },
+    messageOfficeManagerPdfCreated: { en: 'Office Manager PDF created and attached successfully: {0}', ar: 'تم إنشاء ملف PDF الخاص بمدير المكتب وإرفاقه بنجاح: {0}' },
 
     statusPendingOfficeManager: { en: 'Pending Office Manager', ar: 'بانتظار مدير المكتب' },
     statusOnHold: { en: 'On Hold', ar: 'معلق' },
@@ -230,7 +289,8 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
 
       officeManagerComment: '',
       hodComment: '',
-      gmComment: ''
+      gmComment: '',
+      showOfficeManagerEditor: false
     };
   }
 
@@ -306,6 +366,29 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
 
     const translation: ITranslatedText = this.translations[key];
     return translation ? this.t(key) : status;
+  }
+
+  private getStatusClassName(status: string): string {
+    let variantClass: string = styles.statusNeutral;
+
+    if (status === 'Rejected') {
+      variantClass = styles.statusDanger;
+    } else if (status === 'Approved by GM' || status === 'Closed') {
+      variantClass = styles.statusSuccess;
+    } else if (
+      status === 'Pending Office Manager' ||
+      status === 'Pending GM Signature' ||
+      status === 'GM Signed Pending Office Manager Confirmation' ||
+      status === 'On Hold'
+    ) {
+      variantClass = styles.statusPending;
+    }
+
+    return styles.statusBadge + ' ' + variantClass;
+  }
+
+  private renderStatusBadge(status: string): JSX.Element {
+    return <span className={this.getStatusClassName(status)}>{this.getStatusText(status)}</span>;
   }
 
   private getDepartmentText(department: string): string {
@@ -478,7 +561,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     return this.webUrl +
       "/_api/web/lists/GetByTitle('" + this.requestsListName + "')/items" +
       "?$select=Id,Title,RequestNo,RequestDate,Department,RequestDetails,Status," +
-      "OfficeManagerComment,HODComment,GMComment,PDFFileUrl,SignedPDFUrl,SharedFolderPath," +
+      "OfficeManagerComment,HODComment,GMComment,PDFFileUrl,PDFFileJson,SignedPDFUrl,SharedFolderPath," +
       "GMApprovalDetected,GMApprovalConfirmed,Attachments,AttachmentFiles/FileName,AttachmentFiles/ServerRelativeUrl,Author/Id,Author/Title" +
       "&$expand=Author,AttachmentFiles" +
       "&$orderby=Id desc" +
@@ -633,7 +716,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
 
         return this.uploadPdfToLibraryAndListItem(pdfFile, requestNo, createdItemId)
           .then((result: IPdfUploadResult) => {
-            return this.updatePdfMetadata(createdItemId, result);
+            return this.updatePdfMetadata(createdItemId, result, requestNo, '', true);
           });
       })
       .then(() => {
@@ -680,9 +763,11 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   }
 
   private selectRequest(item: IRequestItem): void {
+    this.officeManagerDocumentHtml = '';
     this.setState({
       selectedRequest: item,
       showNewRequestForm: false,
+      showOfficeManagerEditor: false,
       officeManagerComment: item.OfficeManagerComment || '',
       hodComment: item.HODComment || '',
       gmComment: item.GMComment || '',
@@ -973,12 +1058,13 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
 
   private uploadPdfToLibraryAndListItem(file: any, requestNo: string, itemId: number): Promise<IPdfUploadResult> {
     const fileName: string = this.buildPdfFileName(requestNo, file.name || 'request.pdf');
+    const documentType: string = 'Request PDF';
 
     return this.readFileAsArrayBuffer(file)
       .then((fileContent: ArrayBuffer) => {
-        return this.uploadPdfFileToLibrary(fileName, fileContent)
+        return this.uploadPdfFileToLibrary(fileName, fileContent, requestNo, 'request', documentType)
           .then((libraryResult: IPdfUploadResult) => {
-            return this.updateLibraryFileMetadata(libraryResult.serverRelativeUrl, fileName, requestNo, itemId)
+            return this.updateLibraryFileMetadata(libraryResult.serverRelativeUrl, fileName, requestNo, itemId, documentType)
               .then(() => {
                 return this.attachPdfFileToRequestItem(itemId, fileName, fileContent);
               })
@@ -987,7 +1073,6 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
                 libraryResult.contentType = file.type || 'application/pdf';
                 libraryResult.size = file.size || 0;
                 libraryResult.attachmentUrl = attachmentUrl;
-                libraryResult.json = this.buildPdfFileJson(libraryResult, requestNo, itemId);
 
                 return libraryResult;
               });
@@ -995,8 +1080,14 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       });
   }
 
-  private uploadPdfFileToLibrary(fileName: string, fileContent: ArrayBuffer): Promise<IPdfUploadResult> {
-    return this.getDocumentsLibraryServerRelativeUrl()
+  private uploadPdfFileToLibrary(
+    fileName: string,
+    fileContent: ArrayBuffer,
+    requestNo: string,
+    role: string,
+    documentType: string
+  ): Promise<IPdfUploadResult> {
+    return this.getRequestDocumentFolderServerRelativeUrl(requestNo)
       .then((folderServerRelativeUrl: string) => {
         const uploadUrl: string = this.webUrl +
           "/_api/web/GetFolderByServerRelativeUrl('" + this.escapeODataString(folderServerRelativeUrl) + "')" +
@@ -1028,20 +1119,27 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
               (folderServerRelativeUrl + '/' + fileName);
 
             return {
+              role: role,
+              documentType: documentType,
               fileName: fileName,
               originalFileName: '',
               contentType: 'application/pdf',
               size: 0,
               serverRelativeUrl: serverRelativeUrl,
               url: this.getAbsoluteUrl(serverRelativeUrl),
-              attachmentUrl: '',
-              json: ''
+              attachmentUrl: ''
             };
           });
       });
   }
 
-  private updateLibraryFileMetadata(serverRelativeUrl: string, fileName: string, requestNo: string, itemId: number): Promise<void> {
+  private updateLibraryFileMetadata(
+    serverRelativeUrl: string,
+    fileName: string,
+    requestNo: string,
+    itemId: number,
+    documentType: string
+  ): Promise<void> {
     const requiredValues: any = {
       Title: fileName,
       RequestNo: requestNo,
@@ -1049,7 +1147,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     };
 
     const valuesWithDocumentType: any = this.copyValues(requiredValues);
-    valuesWithDocumentType.DocumentType = 'Request PDF';
+    valuesWithDocumentType.DocumentType = documentType;
 
     return this.mergeLibraryFileMetadata(serverRelativeUrl, valuesWithDocumentType)
       .catch(() => {
@@ -1089,6 +1187,37 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     }
 
     return result;
+  }
+
+  private replacePdfFileOnRequestItem(itemId: number, fileName: string, fileContent: ArrayBuffer): Promise<string> {
+    return this.deleteRequestAttachmentIfExists(itemId, fileName)
+      .then(() => this.attachPdfFileToRequestItem(itemId, fileName, fileContent));
+  }
+
+  private deleteRequestAttachmentIfExists(itemId: number, fileName: string): Promise<void> {
+    const url: string = this.webUrl +
+      "/_api/web/lists/GetByTitle('" + this.escapeODataString(this.requestsListName) + "')" +
+      "/items(" + itemId + ")/AttachmentFiles/getByFileName('" + this.escapeODataString(fileName) + "')";
+    const options: ISPHttpClientOptions = {
+      headers: {
+        'Accept': this.odataJsonHeader,
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'DELETE',
+        'odata-version': ''
+      }
+    };
+
+    return this.props.context.spHttpClient
+      .post(url, SPHttpClient.configurations.v1, options)
+      .then((response: SPHttpClientResponse) => {
+        if (response.ok || response.status === 404) {
+          return;
+        }
+
+        return response.text().then((text: string) => {
+          throw new Error(this.formatText('errorListAttachment', text));
+        });
+      });
   }
 
   private attachPdfFileToRequestItem(itemId: number, fileName: string, fileContent: ArrayBuffer): Promise<string> {
@@ -1135,14 +1264,27 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       });
   }
 
-  private updatePdfMetadata(itemId: number, uploadResult: IPdfUploadResult): Promise<void> {
-    return this.updatePdfJson(itemId, uploadResult.json)
+  private updatePdfMetadata(
+    itemId: number,
+    uploadResult: IPdfUploadResult,
+    requestNo: string,
+    existingPdfJson: string,
+    updatePrimaryUrl: boolean
+  ): Promise<string> {
+    const pdfJson: string = this.buildPdfFileJson(uploadResult, requestNo, itemId, existingPdfJson);
+
+    return this.updatePdfJson(itemId, pdfJson)
       .then(() => {
+        if (!updatePrimaryUrl) {
+          return;
+        }
+
         return this.updatePdfFileUrl(itemId, uploadResult.url, uploadResult.fileName)
           .catch(() => {
             return;
           });
-      });
+      })
+      .then(() => pdfJson);
   }
 
   private updatePdfJson(itemId: number, pdfJson: string): Promise<void> {
@@ -1168,12 +1310,16 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     });
   }
 
-  private buildPdfFileJson(uploadResult: IPdfUploadResult, requestNo: string, itemId: number): string {
-    return JSON.stringify({
-      schemaVersion: 1,
-      type: 'GM_REQUEST_PDF',
-      requestItemId: itemId,
-      requestNo: requestNo,
+  private buildPdfFileJson(
+    uploadResult: IPdfUploadResult,
+    requestNo: string,
+    itemId: number,
+    existingPdfJson: string
+  ): string {
+    const documents: IPdfDocumentRecord[] = this.getPdfDocumentsFromJson(existingPdfJson);
+    const uploadedDocument: IPdfDocumentRecord = {
+      role: uploadResult.role,
+      documentType: uploadResult.documentType,
       fileName: uploadResult.fileName,
       originalFileName: uploadResult.originalFileName,
       contentType: uploadResult.contentType,
@@ -1182,7 +1328,77 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       libraryUrl: uploadResult.url,
       serverRelativeUrl: uploadResult.serverRelativeUrl,
       attachmentUrl: uploadResult.attachmentUrl
+    };
+    let replaced: boolean = false;
+
+    for (let i = 0; i < documents.length; i++) {
+      if (documents[i].role === uploadResult.role) {
+        documents[i] = uploadedDocument;
+        replaced = true;
+        break;
+      }
+    }
+
+    if (!replaced) {
+      documents.push(uploadedDocument);
+    }
+
+    return JSON.stringify({
+      schemaVersion: 2,
+      type: 'GM_REQUEST_PDF_COLLECTION',
+      requestItemId: itemId,
+      requestNo: requestNo,
+      documents: documents
     });
+  }
+
+  private getPdfDocumentsFromJson(pdfJson: string): IPdfDocumentRecord[] {
+    if (!pdfJson) {
+      return [];
+    }
+
+    try {
+      const parsed: any = JSON.parse(pdfJson);
+      const rawDocuments: any[] = parsed && (parsed.documents || parsed.files);
+      const documents: IPdfDocumentRecord[] = [];
+
+      if (rawDocuments && rawDocuments.length !== undefined) {
+        for (let i = 0; i < rawDocuments.length; i++) {
+          documents.push(this.normalizePdfDocument(rawDocuments[i], ''));
+        }
+        return documents;
+      }
+
+      if (parsed && (parsed.fileName || parsed.libraryUrl || parsed.serverRelativeUrl)) {
+        documents.push(this.normalizePdfDocument(parsed, 'request'));
+      }
+
+      return documents;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  private normalizePdfDocument(value: any, defaultRole: string): IPdfDocumentRecord {
+    const documentType: string = value.documentType || value.DocumentType || '';
+    let role: string = value.role || value.documentRole || defaultRole;
+
+    if (!role) {
+      role = documentType.toLowerCase().indexOf('office manager') >= 0 ? 'officeManager' : 'request';
+    }
+
+    return {
+      role: role,
+      documentType: documentType || (role === 'officeManager' ? 'Office Manager PDF' : 'Request PDF'),
+      fileName: value.fileName || '',
+      originalFileName: value.originalFileName || value.fileName || '',
+      contentType: value.contentType || 'application/pdf',
+      size: value.size || 0,
+      uploadedAt: value.uploadedAt || '',
+      libraryUrl: value.libraryUrl || value.url || '',
+      serverRelativeUrl: value.serverRelativeUrl || '',
+      attachmentUrl: value.attachmentUrl || ''
+    };
   }
 
   private readFileAsArrayBuffer(file: any): Promise<ArrayBuffer> {
@@ -1232,6 +1448,76 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       });
   }
 
+  private getRequestDocumentFolderServerRelativeUrl(requestNo: string): Promise<string> {
+    return this.getDocumentsLibraryServerRelativeUrl()
+      .then((libraryRootUrl: string) => {
+        const folderName: string = this.sanitizeSharePointFolderName(requestNo);
+        const folderUrl: string = libraryRootUrl.replace(/\/+$/, '') + '/' + folderName;
+
+        return this.ensureSharePointFolder(folderUrl)
+          .then(() => folderUrl);
+      })
+      .catch((error: any) => {
+        throw new Error(this.formatText('errorRequestFolder', this.getErrorMessage(error)));
+      });
+  }
+
+  private ensureSharePointFolder(folderServerRelativeUrl: string): Promise<void> {
+    const getFolderUrl: string = this.webUrl +
+      "/_api/web/GetFolderByServerRelativeUrl('" + this.escapeODataString(folderServerRelativeUrl) + "')" +
+      "?$select=ServerRelativeUrl";
+
+    return this.props.context.spHttpClient
+      .get(getFolderUrl, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
+      .then((response: SPHttpClientResponse) => {
+        if (response.ok) {
+          return;
+        }
+
+        if (response.status !== 404) {
+          return response.text().then((text: string) => {
+            throw new Error(text);
+          });
+        }
+
+        const createFolderUrl: string = this.webUrl +
+          "/_api/web/folders/add('" + this.escapeODataString(folderServerRelativeUrl) + "')";
+        const options: ISPHttpClientOptions = {
+          headers: {
+            'Accept': this.odataJsonHeader,
+            'Content-Type': this.odataJsonHeader,
+            'odata-version': ''
+          }
+        };
+
+        return this.props.context.spHttpClient
+          .post(createFolderUrl, SPHttpClient.configurations.v1, options)
+          .then((createResponse: SPHttpClientResponse) => {
+            if (createResponse.ok) {
+              return;
+            }
+
+            return this.props.context.spHttpClient
+              .get(getFolderUrl, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
+              .then((retryResponse: SPHttpClientResponse) => {
+                if (retryResponse.ok) {
+                  return;
+                }
+
+                return createResponse.text().then((text: string) => {
+                  throw new Error(text);
+                });
+              });
+          });
+      });
+  }
+
+  private sanitizeSharePointFolderName(requestNo: string): string {
+    let result: string = (requestNo || 'REQUEST').replace(/[\\\/:*?"<>|#%]+/g, '-');
+    result = result.replace(/^-+/, '').replace(/-+$/, '');
+    return result || 'REQUEST';
+  }
+
   private buildPdfFileName(requestNo: string, originalFileName: string): string {
     let cleanName: string = (originalFileName || 'request.pdf').replace(/\.pdf$/i, '');
     cleanName = cleanName.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+/, '').replace(/-+$/, '');
@@ -1265,6 +1551,15 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   }
 
   private getRequestPdfUrl(item: IRequestItem): string {
+    const requestDocument: IPdfDocumentRecord = this.getPdfDocumentByRole(item, 'request');
+
+    if (requestDocument) {
+      const documentUrl: string = this.getPdfDocumentUrl(requestDocument);
+      if (documentUrl) {
+        return documentUrl;
+      }
+    }
+
     const fieldUrl: string = this.getUrlValue(item.PDFFileUrl);
 
     if (fieldUrl) {
@@ -1272,6 +1567,88 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     }
 
     return this.getFirstAttachmentUrl(item);
+  }
+
+  private getOfficeManagerPdfUrl(item: IRequestItem): string {
+    const documentRecord: IPdfDocumentRecord = this.getPdfDocumentByRole(item, 'officeManager');
+    return documentRecord ? this.getPdfDocumentUrl(documentRecord) : '';
+  }
+
+  private getPdfDocuments(item: IRequestItem): IPdfDocumentRecord[] {
+    if (!item) {
+      return [];
+    }
+
+    const documents: IPdfDocumentRecord[] = this.getPdfDocumentsFromJson(item.PDFFileJson || '');
+    let hasRequestDocument: boolean = false;
+
+    for (let i = 0; i < documents.length; i++) {
+      if (documents[i].role === 'request') {
+        hasRequestDocument = true;
+        break;
+      }
+    }
+
+    const legacyUrl: string = this.getUrlValue(item.PDFFileUrl) || this.getFirstAttachmentUrl(item);
+    if (!hasRequestDocument && legacyUrl) {
+      documents.unshift({
+        role: 'request',
+        documentType: 'Request PDF',
+        fileName: this.getFileNameFromUrl(legacyUrl),
+        originalFileName: '',
+        contentType: 'application/pdf',
+        size: 0,
+        uploadedAt: '',
+        libraryUrl: legacyUrl,
+        serverRelativeUrl: '',
+        attachmentUrl: ''
+      });
+    }
+
+    return documents;
+  }
+
+  private getPdfDocumentByRole(item: IRequestItem, role: string): IPdfDocumentRecord {
+    const documents: IPdfDocumentRecord[] = this.getPdfDocuments(item);
+
+    for (let i = 0; i < documents.length; i++) {
+      if (documents[i].role === role) {
+        return documents[i];
+      }
+    }
+
+    return null;
+  }
+
+  private getPdfDocumentUrl(documentRecord: IPdfDocumentRecord): string {
+    if (!documentRecord) {
+      return '';
+    }
+
+    if (documentRecord.libraryUrl) {
+      return documentRecord.libraryUrl;
+    }
+
+    if (documentRecord.serverRelativeUrl) {
+      return this.getAbsoluteUrl(documentRecord.serverRelativeUrl);
+    }
+
+    return documentRecord.attachmentUrl || '';
+  }
+
+  private getFileNameFromUrl(url: string): string {
+    if (!url) {
+      return '';
+    }
+
+    const cleanUrl: string = url.split('?')[0];
+    const segments: string[] = cleanUrl.split('/');
+
+    try {
+      return decodeURIComponent(segments[segments.length - 1] || '');
+    } catch (e) {
+      return segments[segments.length - 1] || '';
+    }
   }
 
   private getFirstAttachmentUrl(item: IRequestItem): string {
@@ -1286,14 +1663,276 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       return '';
     }
 
-    const firstAttachment: any = results[0];
-    const serverRelativeUrl: string = firstAttachment.ServerRelativeUrl || '';
+    for (let i = 0; i < results.length; i++) {
+      const attachment: any = results[i];
+      const attachmentFileName: string = (attachment.FileName || '').toLowerCase();
+      const serverRelativeUrl: string = attachment.ServerRelativeUrl || '';
 
-    if (!serverRelativeUrl) {
+      if (serverRelativeUrl && attachmentFileName.indexOf('officemanager(') !== 0) {
+        return this.getAbsoluteUrl(serverRelativeUrl);
+      }
+    }
+
+    return '';
+  }
+
+  private openOfficeManagerDocumentEditor(item: IRequestItem): void {
+    this.officeManagerDocumentHtml = this.buildOfficeManagerDocumentTemplate(item);
+    this.setState({
+      showOfficeManagerEditor: true,
+      error: '',
+      message: ''
+    }, () => {
+      if (this.officeManagerEditor) {
+        this.officeManagerEditor.innerHTML = this.officeManagerDocumentHtml;
+        this.officeManagerEditor.focus();
+      }
+    });
+  }
+
+  private closeOfficeManagerDocumentEditor(): void {
+    this.setState({
+      showOfficeManagerEditor: false
+    });
+  }
+
+  private buildOfficeManagerDocumentTemplate(item: IRequestItem): string {
+    const title: string = this.escapeHtml(item.Title || '');
+    const requestNo: string = this.escapeHtml(item.RequestNo || '');
+    const department: string = this.escapeHtml(this.getDepartmentText(item.Department || ''));
+    const createdBy: string = this.escapeHtml(item.Author ? item.Author.Title : '');
+    const requestDetails: string = this.escapeHtml(item.RequestDetails || '').replace(/\r?\n/g, '<br />');
+    const managerComment: string = this.escapeHtml(this.state.officeManagerComment || '').replace(/\r?\n/g, '<br />');
+
+    return '' +
+      '<div>' +
+        '<p style="margin:0 0 8px;color:#107c41;font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;">' +
+          this.escapeHtml(this.t('officeManagerDocument')) +
+        '</p>' +
+        '<h1 style="margin:0 0 20px;color:#102a43;font-size:28px;line-height:1.25;">' + title + '</h1>' +
+        '<table style="width:100%;margin:0 0 24px;border-collapse:collapse;font-size:13px;">' +
+          '<tbody>' +
+            '<tr>' +
+              '<td style="width:32%;padding:9px;border:1px solid #d9e2ec;background:#f4f7f6;font-weight:700;">' + this.escapeHtml(this.t('requestNo')) + '</td>' +
+              '<td style="padding:9px;border:1px solid #d9e2ec;">' + requestNo + '</td>' +
+            '</tr>' +
+            '<tr>' +
+              '<td style="padding:9px;border:1px solid #d9e2ec;background:#f4f7f6;font-weight:700;">' + this.escapeHtml(this.t('department')) + '</td>' +
+              '<td style="padding:9px;border:1px solid #d9e2ec;">' + department + '</td>' +
+            '</tr>' +
+            '<tr>' +
+              '<td style="padding:9px;border:1px solid #d9e2ec;background:#f4f7f6;font-weight:700;">' + this.escapeHtml(this.t('createdBy')) + '</td>' +
+              '<td style="padding:9px;border:1px solid #d9e2ec;">' + createdBy + '</td>' +
+            '</tr>' +
+          '</tbody>' +
+        '</table>' +
+        '<h2 style="margin:0 0 8px;color:#102a43;font-size:18px;">' + this.escapeHtml(this.t('requestDetails')) + '</h2>' +
+        '<p style="min-height:54px;margin:0 0 22px;line-height:1.65;">' + (requestDetails || '<br />') + '</p>' +
+        '<h2 style="margin:0 0 8px;color:#102a43;font-size:18px;">' + this.escapeHtml(this.t('officeManagerComment')) + '</h2>' +
+        '<p style="min-height:92px;margin:0 0 22px;line-height:1.65;">' + (managerComment || '<br />') + '</p>' +
+      '</div>';
+  }
+
+  private applyEditorCommand(event: any, command: string, value?: string): void {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+
+    if (!this.officeManagerEditor) {
+      return;
+    }
+
+    this.officeManagerEditor.focus();
+    document.execCommand(command, false, value || null);
+    this.officeManagerDocumentHtml = this.officeManagerEditor.innerHTML;
+  }
+
+  private onEditorInput(): void {
+    if (this.officeManagerEditor) {
+      this.officeManagerDocumentHtml = this.officeManagerEditor.innerHTML;
+    }
+  }
+
+  private createAndAttachOfficeManagerPdf(): void {
+    const item: IRequestItem = this.state.selectedRequest;
+
+    if (!item || !this.officeManagerEditor) {
+      this.setState({ error: this.t('errorEditorUnavailable') });
+      return;
+    }
+
+    const fileName: string = this.buildOfficeManagerPdfFileName(item.RequestNo);
+    const editorElement: HTMLDivElement = this.officeManagerEditor;
+    this.officeManagerDocumentHtml = editorElement.innerHTML;
+
+    this.setState({
+      saving: true,
+      error: '',
+      message: this.t('generatingPdf')
+    });
+
+    let generatedBlob: Blob = null;
+
+    this.createPdfBlob(editorElement, fileName)
+      .then((pdfBlob: Blob) => {
+        generatedBlob = pdfBlob;
+        return this.readFileAsArrayBuffer(pdfBlob);
+      })
+      .then((fileContent: ArrayBuffer) => {
+        return this.uploadPdfFileToLibrary(fileName, fileContent, item.RequestNo, 'officeManager', 'Office Manager PDF')
+          .then((uploadResult: IPdfUploadResult) => {
+            return this.updateLibraryFileMetadata(
+              uploadResult.serverRelativeUrl,
+              fileName,
+              item.RequestNo,
+              item.Id,
+              'Office Manager PDF'
+            )
+              .then(() => this.replacePdfFileOnRequestItem(item.Id, fileName, fileContent))
+              .then((attachmentUrl: string) => {
+                uploadResult.originalFileName = fileName;
+                uploadResult.contentType = 'application/pdf';
+                uploadResult.size = generatedBlob ? generatedBlob.size : fileContent.byteLength;
+                uploadResult.attachmentUrl = attachmentUrl;
+                return uploadResult;
+              });
+          });
+      })
+      .then((uploadResult: IPdfUploadResult) => {
+        return this.updatePdfMetadata(item.Id, uploadResult, item.RequestNo, this.buildPdfJsonSnapshot(item), false);
+      })
+      .then((pdfJson: string) => {
+        const updatedItem: IRequestItem = this.copyRequestItem(item);
+        updatedItem.PDFFileJson = pdfJson;
+        const updatedRequests: IRequestItem[] = this.replaceRequestInCollection(item.Id, updatedItem);
+
+        this.setState({
+          saving: false,
+          message: this.formatText('messageOfficeManagerPdfCreated', fileName),
+          selectedRequest: updatedItem,
+          requests: updatedRequests,
+          showOfficeManagerEditor: false
+        });
+      })
+      .catch((error: any) => {
+        this.setState({
+          saving: false,
+          error: this.formatText('errorOfficeManagerPdf', this.getErrorMessage(error)),
+          message: ''
+        });
+      });
+  }
+
+  private createPdfBlob(element: HTMLElement, fileName: string): Promise<Blob> {
+    const html2PdfModule: any = require('html2pdf.js');
+    const html2Pdf: any = html2PdfModule.default || html2PdfModule;
+    const captureElement: HTMLElement = element.cloneNode(true) as HTMLElement;
+    captureElement.removeAttribute('contenteditable');
+    captureElement.removeAttribute('role');
+    captureElement.style.width = '100%';
+    captureElement.style.minHeight = '277mm';
+    captureElement.style.margin = '0';
+    captureElement.style.padding = '48px';
+    captureElement.style.boxSizing = 'border-box';
+    captureElement.style.boxShadow = 'none';
+    captureElement.style.background = '#ffffff';
+
+    const options: any = {
+      margin: [10, 10, 10, 10],
+      filename: fileName,
+      image: {
+        type: 'jpeg',
+        quality: 0.98
+      },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
+      },
+      jsPDF: {
+        unit: 'mm',
+        format: 'a4',
+        orientation: 'portrait'
+      },
+      pagebreak: {
+        mode: ['css', 'legacy']
+      }
+    };
+
+    return html2Pdf()
+      .set(options)
+      .from(captureElement)
+      .toPdf()
+      .outputPdf('blob')
+      .then((blob: Blob) => blob)
+      .catch((error: any) => {
+        const overlay: Element = document.querySelector('.html2pdf__overlay');
+        if (overlay && overlay.parentNode) {
+          overlay.parentNode.removeChild(overlay);
+        }
+        throw error;
+      });
+  }
+
+  private buildOfficeManagerPdfFileName(requestNo: string): string {
+    return 'OfficeManager(' + this.sanitizeSharePointFolderName(requestNo) + ').pdf';
+  }
+
+  private buildPdfJsonSnapshot(item: IRequestItem): string {
+    return JSON.stringify({
+      schemaVersion: 2,
+      type: 'GM_REQUEST_PDF_COLLECTION',
+      requestItemId: item.Id,
+      requestNo: item.RequestNo,
+      documents: this.getPdfDocuments(item)
+    });
+  }
+
+  private copyRequestItem(item: IRequestItem): IRequestItem {
+    const result: any = {};
+
+    for (const key in item) {
+      if (item.hasOwnProperty(key)) {
+        result[key] = item[key];
+      }
+    }
+
+    return result as IRequestItem;
+  }
+
+  private replaceRequestInCollection(itemId: number, replacement: IRequestItem): IRequestItem[] {
+    const result: IRequestItem[] = this.state.requests.slice(0);
+
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].Id === itemId) {
+        result[i] = replacement;
+        break;
+      }
+    }
+
+    return result;
+  }
+
+  private escapeHtml(value: string): string {
+    return (value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  private formatFileSize(size: number): string {
+    if (!size) {
       return '';
     }
 
-    return this.getAbsoluteUrl(serverRelativeUrl);
+    if (size < 1024 * 1024) {
+      return Math.max(1, Math.round(size / 1024)) + ' KB';
+    }
+
+    return (Math.round((size / (1024 * 1024)) * 10) / 10) + ' MB';
   }
 
   private clearNewRequestForm(): void {
@@ -1371,7 +2010,12 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     const isRequestOpen: boolean = !!this.state.selectedRequest;
 
     return (
-      <div className={this.getRootClassName()} dir={this.state.language === 'ar' ? 'rtl' : 'ltr'} lang={this.state.language}>
+      <div
+        className={this.getRootClassName()}
+        dir={this.state.language === 'ar' ? 'rtl' : 'ltr'}
+        lang={this.state.language}
+        aria-busy={this.state.saving || this.state.loading}
+      >
         <div className={styles.header}>
           <div className={styles.headerTop}>
             <div className={styles.brandBlock}>
@@ -1379,6 +2023,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
               <div className={styles.headerText}>
                 <h2>{this.t('appTitle')}</h2>
                 <div className={styles.userMeta}>
+                  <div>{this.t('appSubtitle')}</div>
                   <div>{this.t('currentUser')} <strong>{this.state.currentUserTitle}</strong></div>
                   <div>{this.t('groups')} {this.state.groups.join(', ')}</div>
                 </div>
@@ -1386,14 +2031,18 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
             </div>
             <div className={styles.languageSwitcher}>
               <button
+                type="button"
                 className={this.state.language === 'en' ? styles.languageButtonActive : styles.languageButton}
                 onClick={() => this.setLanguage('en')}
+                aria-pressed={this.state.language === 'en'}
               >
                 {this.t('english')}
               </button>
               <button
+                type="button"
                 className={this.state.language === 'ar' ? styles.languageButtonActive : styles.languageButton}
                 onClick={() => this.setLanguage('ar')}
+                aria-pressed={this.state.language === 'ar'}
               >
                 {this.t('arabic')}
               </button>
@@ -1401,34 +2050,36 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           </div>
         </div>
 
-        {this.state.error &&
-          <div className={styles.error}>{this.state.error}</div>
-        }
+        <div className={styles.content}>
+          {this.state.error &&
+            <div className={styles.error} role="alert">{this.state.error}</div>
+          }
 
-        {this.state.message &&
-          <div className={styles.success}>{this.state.message}</div>
-        }
+          {this.state.message &&
+            <div className={styles.success} role="status" aria-live="polite">{this.state.message}</div>
+          }
 
-        {this.state.loading &&
-          <div>{this.t('loadingRequests')}</div>
-        }
+          {this.state.loading &&
+            <div className={styles.loadingCard} role="status" aria-live="polite">{this.t('loadingRequests')}</div>
+          }
 
-        {!this.state.loading && !isRequestOpen && this.renderAccessMessage()}
+          {!this.state.loading && !isRequestOpen && this.renderAccessMessage()}
 
-        {!this.state.loading && !isRequestOpen && this.canCreateRequest() && this.renderNewRequestLauncher()}
+          {!this.state.loading && !isRequestOpen && this.canCreateRequest() && this.renderNewRequestLauncher()}
 
-        {!this.state.loading && !isRequestOpen && this.canCreateRequest() && this.renderNewRequestForm()}
+          {!this.state.loading && !isRequestOpen && this.canCreateRequest() && this.renderNewRequestForm()}
 
-        {!this.state.loading && !isRequestOpen && this.canCreateRequest() && this.renderRequestTable(this.t('myRequests'), this.getMyRequests())}
+          {!this.state.loading && !isRequestOpen && this.canCreateRequest() && this.renderRequestTable(this.t('myRequests'), this.getMyRequests())}
 
-        {!this.state.loading && !isRequestOpen && this.state.isOfficeManager && this.renderRequestTable(this.t('officeManagerQueue'), this.getOfficeManagerRequests())}
+          {!this.state.loading && !isRequestOpen && this.state.isOfficeManager && this.renderRequestTable(this.t('officeManagerQueue'), this.getOfficeManagerRequests())}
 
-        {!this.state.loading && !isRequestOpen && this.state.isHod && this.renderRequestTable(this.t('hodQueue'), this.getHodRequests())}
+          {!this.state.loading && !isRequestOpen && this.state.isHod && this.renderRequestTable(this.t('hodQueue'), this.getHodRequests())}
 
-        {!this.state.loading && this.renderDetailsPanel()}
+          {!this.state.loading && this.renderDetailsPanel()}
 
-        <div className={styles.footer}>
-          {this.t('footer')}
+          <div className={styles.footer}>
+            {this.t('footer')}
+          </div>
         </div>
       </div>
     );
@@ -1456,8 +2107,18 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     }
 
     return (
-      <div className={styles.section}>
-        <button disabled={this.state.saving} onClick={() => this.showNewRequestForm()}>
+      <div className={styles.section + ' ' + styles.launcherSection}>
+        <div className={styles.sectionTitleBlock}>
+          <div className={styles.sectionEyebrow}>{this.t('newRequestEyebrow')}</div>
+          <h3>{this.t('newRequest')}</h3>
+          <div className={styles.sectionDescription}>{this.t('newRequestDescription')}</div>
+        </div>
+        <button
+          type="button"
+          className={styles.newRequestButton}
+          disabled={this.state.saving}
+          onClick={() => this.showNewRequestForm()}
+        >
           {this.t('newRequest')}
         </button>
       </div>
@@ -1468,8 +2129,9 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     if (this.state.isOfficeManager) {
       return (
         <div className={styles.formRow}>
-          <label>{this.t('routeTo')}</label>
+          <label htmlFor="gm-new-request-route">{this.t('routeTo')}</label>
           <select
+            id="gm-new-request-route"
             value={this.state.newRequestStatus || 'Sent to HOD'}
             onChange={(e: any) => this.setState({ newRequestStatus: e.target.value })}
           >
@@ -1498,62 +2160,101 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
 
     return (
       <div className={styles.section}>
-        <h3>{this.t('newRequest')}</h3>
-
-        <div className={styles.formRow}>
-          <label>{this.t('title')}</label>
-          <input
-            type="text"
-            value={this.state.newTitle}
-            onChange={(e: any) => this.setState({ newTitle: e.target.value })}
-          />
-        </div>
-
-        <div className={styles.formRow}>
-          <label>{this.t('department')}</label>
-          <select
-            value={this.state.newDepartment}
-            onChange={(e: any) => this.setState({ newDepartment: e.target.value })}
-          >
-            <option value="">{this.t('selectDepartment')}</option>
-            {this.departmentOptions.map((department: string) => {
-              return (
-                <option key={department} value={department}>{this.getDepartmentText(department)}</option>
-              );
-            })}
-          </select>
-        </div>
-
-        <div className={styles.formRow}>
-          <label>{this.t('requestDetails')}</label>
-          <textarea
-            value={this.state.newDetails}
-            onChange={(e: any) => this.setState({ newDetails: e.target.value })}
-          />
-        </div>
-
-        {this.renderNewRequestRouting()}
-
-        <div className={styles.formRow}>
-          <label>{this.t('pdfAttachment')}</label>
-          <input
-            type="file"
-            accept="application/pdf,.pdf"
-            ref={(input: HTMLInputElement) => { this.pdfFileInput = input; }}
-            onChange={(e: any) => this.onPdfFileChange(e)}
-          />
-          <div className={styles.helpText}>
-            {this.state.newPdfFile ? this.state.newPdfFile.name : this.t('pdfHelp')}
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitleBlock}>
+            <div className={styles.sectionEyebrow}>{this.t('newRequestEyebrow')}</div>
+            <h3>{this.t('newRequest')}</h3>
+            <div className={styles.sectionDescription}>{this.t('newRequestDescription')}</div>
           </div>
         </div>
 
-        <button disabled={this.state.saving} onClick={() => this.createRequest()}>
-          {this.state.saving ? this.t('submitting') : this.getNewRequestSubmitText()}
-        </button>
+        <div className={styles.formGrid}>
+          <div className={styles.formRow}>
+            <label htmlFor="gm-new-request-title">{this.t('title')}</label>
+            <input
+              id="gm-new-request-title"
+              type="text"
+              value={this.state.newTitle}
+              onChange={(e: any) => this.setState({ newTitle: e.target.value })}
+            />
+          </div>
 
-        <button className={styles.secondaryButton} disabled={this.state.saving} onClick={() => this.cancelNewRequest()}>
-          {this.t('cancel')}
-        </button>
+          <div className={styles.formRow}>
+            <label htmlFor="gm-new-request-department">{this.t('department')}</label>
+            <select
+              id="gm-new-request-department"
+              value={this.state.newDepartment}
+              onChange={(e: any) => this.setState({ newDepartment: e.target.value })}
+            >
+              <option value="">{this.t('selectDepartment')}</option>
+              {this.departmentOptions.map((department: string) => {
+                return (
+                  <option key={department} value={department}>{this.getDepartmentText(department)}</option>
+                );
+              })}
+            </select>
+          </div>
+
+          <div className={styles.formRowWide}>
+            <label htmlFor="gm-new-request-details">{this.t('requestDetails')}</label>
+            <textarea
+              id="gm-new-request-details"
+              value={this.state.newDetails}
+              onChange={(e: any) => this.setState({ newDetails: e.target.value })}
+            />
+          </div>
+
+          {this.renderNewRequestRouting()}
+
+          <div className={styles.formRowWide}>
+            <label>{this.t('pdfAttachment')}</label>
+            <input
+              id="gm-new-request-pdf"
+              className={styles.hiddenFileInput}
+              type="file"
+              accept="application/pdf,.pdf"
+              ref={(input: HTMLInputElement) => { this.pdfFileInput = input; }}
+              onChange={(e: any) => this.onPdfFileChange(e)}
+            />
+            <label className={styles.filePicker} htmlFor="gm-new-request-pdf">
+              <span className={styles.filePickerIcon}>PDF</span>
+              <span className={styles.filePickerBody}>
+                <strong>{this.state.newPdfFile ? this.t('replacePdf') : this.t('choosePdf')}</strong>
+                <span>{this.t('pdfFolderHelp')}</span>
+              </span>
+            </label>
+            {this.state.newPdfFile &&
+              <div className={styles.selectedFile}>
+                <span className={styles.fileBadge}>PDF</span>
+                <span>
+                  {this.state.newPdfFile.name}
+                  {this.formatFileSize(this.state.newPdfFile.size) && ' · ' + this.formatFileSize(this.state.newPdfFile.size)}
+                </span>
+              </div>
+            }
+            <div className={styles.helpText}>{this.t('pdfHelp')}</div>
+          </div>
+        </div>
+
+        <div className={styles.formActions}>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            disabled={this.state.saving}
+            onClick={() => this.createRequest()}
+          >
+            {this.state.saving ? this.t('submitting') : this.getNewRequestSubmitText()}
+          </button>
+
+          <button
+            type="button"
+            className={styles.buttonSecondary}
+            disabled={this.state.saving}
+            onClick={() => this.cancelNewRequest()}
+          >
+            {this.t('cancel')}
+          </button>
+        </div>
       </div>
     );
   }
@@ -1561,47 +2262,78 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   private renderRequestTable(title: string, items: IRequestItem[]): JSX.Element {
     return (
       <div className={styles.section}>
-        <h3>{title}</h3>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitleBlock}>
+            <div className={styles.sectionEyebrow}>{this.t('requestOverview')}</div>
+            <h3>{title}</h3>
+          </div>
+        </div>
 
         {items.length === 0 &&
-          <div>{this.t('noRequestsFound')}</div>
+          <div className={styles.emptyState}>{this.t('noRequestsFound')}</div>
         }
 
         {items.length > 0 &&
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>{this.t('requestNo')}</th>
-                <th>{this.t('title')}</th>
-                <th>{this.t('department')}</th>
-                <th>{this.t('status')}</th>
-                <th>{this.t('createdBy')}</th>
-                <th>{this.t('pdf')}</th>
-                <th>{this.t('open')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item: IRequestItem) => {
-                return (
-                  <tr key={item.Id}>
-                    <td>{item.RequestNo}</td>
-                    <td>{item.Title}</td>
-                    <td>{this.getDepartmentText(item.Department)}</td>
-                    <td>{this.getStatusText(item.Status)}</td>
-                    <td>{item.Author ? item.Author.Title : ''}</td>
-                    <td>
-                      {this.getRequestPdfUrl(item) &&
-                        <a href={this.getRequestPdfUrl(item)} target="_blank">{this.t('open')}</a>
-                      }
-                    </td>
-                    <td>
-                      <button onClick={() => this.selectRequest(item)}>{this.t('open')}</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className={styles.tableViewport}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>{this.t('requestNo')}</th>
+                  <th>{this.t('title')}</th>
+                  <th>{this.t('department')}</th>
+                  <th>{this.t('status')}</th>
+                  <th>{this.t('createdBy')}</th>
+                  <th>{this.t('pdf')}</th>
+                  <th>{this.t('open')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item: IRequestItem) => {
+                  return (
+                    <tr key={item.Id}>
+                      <td>{item.RequestNo}</td>
+                      <td>{item.Title}</td>
+                      <td>{this.getDepartmentText(item.Department)}</td>
+                      <td>{this.renderStatusBadge(item.Status)}</td>
+                      <td>{item.Author ? item.Author.Title : ''}</td>
+                      <td>
+                        {this.getRequestPdfUrl(item) &&
+                          <a
+                            href={this.getRequestPdfUrl(item)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {this.t('requestPdf')}
+                          </a>
+                        }
+                        {this.getOfficeManagerPdfUrl(item) &&
+                          <span>
+                            {' · '}
+                            <a
+                              href={this.getOfficeManagerPdfUrl(item)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {this.t('officeManagerPdf')}
+                            </a>
+                          </span>
+                        }
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className={styles.openButton}
+                          onClick={() => this.selectRequest(item)}
+                        >
+                          {this.t('open')}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         }
       </div>
     );
@@ -1616,20 +2348,37 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
 
     return (
       <div className={styles.section}>
-        <h3>{this.t('requestDetailsTitle')}</h3>
-
-        <div className={styles.detailsGrid}>
-          <div><strong>{this.t('id')}</strong> {item.Id}</div>
-          <div><strong>{this.t('requestNoLabel')}</strong> {item.RequestNo}</div>
-          <div><strong>{this.t('titleLabel')}</strong> {item.Title}</div>
-          <div><strong>{this.t('departmentLabel')}</strong> {this.getDepartmentText(item.Department)}</div>
-          <div><strong>{this.t('statusLabel')}</strong> {this.getStatusText(item.Status)}</div>
-          <div><strong>{this.t('createdByLabel')}</strong> {item.Author ? item.Author.Title : ''}</div>
+        <div className={styles.detailsHero}>
+          <div className={styles.sectionTitleBlock}>
+            <div className={styles.sectionEyebrow}>{this.t('requestOverview')}</div>
+            <h3 className={styles.detailsTitle}>{item.Title || this.t('requestDetailsTitle')}</h3>
+            <div className={styles.sectionDescription}>{this.t('requestOverviewDescription')}</div>
+          </div>
+          {this.renderStatusBadge(item.Status)}
         </div>
 
-        <div className={styles.formRow}>
-          <label>{this.t('requestDetails')}</label>
-          <textarea value={item.RequestDetails || ''} readOnly={true} />
+        <div className={styles.metadataGrid}>
+          <div className={styles.metadataCard}>
+            <div className={styles.metadataLabel}>{this.t('id')}</div>
+            <div className={styles.metadataValue}>{item.Id}</div>
+          </div>
+          <div className={styles.metadataCard}>
+            <div className={styles.metadataLabel}>{this.t('requestNoLabel')}</div>
+            <div className={styles.metadataValue}>{item.RequestNo}</div>
+          </div>
+          <div className={styles.metadataCard}>
+            <div className={styles.metadataLabel}>{this.t('departmentLabel')}</div>
+            <div className={styles.metadataValue}>{this.getDepartmentText(item.Department)}</div>
+          </div>
+          <div className={styles.metadataCard}>
+            <div className={styles.metadataLabel}>{this.t('createdByLabel')}</div>
+            <div className={styles.metadataValue}>{item.Author ? item.Author.Title : ''}</div>
+          </div>
+        </div>
+
+        <div className={styles.formRowWide}>
+          <label htmlFor="gm-request-details-readonly">{this.t('requestDetails')}</label>
+          <textarea id="gm-request-details-readonly" value={item.RequestDetails || ''} readOnly={true} />
         </div>
 
         {item.SharedFolderPath &&
@@ -1638,24 +2387,89 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           </div>
         }
 
-        {this.getRequestPdfUrl(item) &&
-          <div className={styles.infoBox}>
-            {this.t('attachedPdf')} <a href={this.getRequestPdfUrl(item)} target="_blank">{this.t('openPdf')}</a>
+        <div className={styles.sectionHeader}>
+          <div className={styles.sectionTitleBlock}>
+            <div className={styles.sectionEyebrow}>{this.t('documents')}</div>
+            <h3>{this.t('documents')}</h3>
           </div>
-        }
+        </div>
 
-        {this.getUrlValue(item.SignedPDFUrl) &&
-          <div className={styles.infoBox}>
-            {this.t('signedPdf')} <a href={this.getUrlValue(item.SignedPDFUrl)} target="_blank">{this.t('openSignedPdf')}</a>
-          </div>
-        }
+        {this.renderRequestDocuments(item)}
 
         {this.renderOfficeManagerActions(item)}
         {this.renderHodActions(item)}
 
-        <button className={styles.secondaryButton} onClick={() => this.setState({ selectedRequest: null })}>
-          {this.t('closeDetails')}
-        </button>
+        <div className={styles.formActions}>
+          <button
+            type="button"
+            className={styles.buttonSecondary}
+            disabled={this.state.saving}
+            onClick={() => this.setState({ selectedRequest: null, showOfficeManagerEditor: false })}
+          >
+            {this.t('closeDetails')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  private renderRequestDocuments(item: IRequestItem): JSX.Element {
+    const documents: IPdfDocumentRecord[] = this.getPdfDocuments(item);
+    const signedPdfUrl: string = this.getUrlValue(item.SignedPDFUrl);
+
+    if (documents.length === 0 && !signedPdfUrl) {
+      return <div className={styles.emptyState}>{this.t('noDocuments')}</div>;
+    }
+
+    return (
+      <div className={styles.documentGrid}>
+        {documents.map((documentRecord: IPdfDocumentRecord, index: number) => {
+          const documentUrl: string = this.getPdfDocumentUrl(documentRecord);
+          const documentTitle: string = documentRecord.role === 'officeManager' ? this.t('officeManagerPdf') : this.t('requestPdf');
+          const fileName: string = documentRecord.fileName || this.getFileNameFromUrl(documentUrl) || documentTitle;
+
+          return (
+            <div className={styles.documentCard} key={documentRecord.role + '-' + index}>
+              <div className={styles.documentIcon}>PDF</div>
+              <div className={styles.documentInfo}>
+                <div className={styles.documentTitle}>{documentTitle}</div>
+                <div className={styles.documentName}>{fileName}</div>
+                <div className={styles.documentMeta}>
+                  {this.t('storedInRequestFolder')}
+                  {this.formatFileSize(documentRecord.size) && ' · ' + this.formatFileSize(documentRecord.size)}
+                </div>
+              </div>
+              {documentUrl &&
+                <a
+                  className={styles.documentLink}
+                  href={documentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {this.t('openDocument')}
+                </a>
+              }
+            </div>
+          );
+        })}
+
+        {signedPdfUrl &&
+          <div className={styles.documentCard}>
+            <div className={styles.documentIcon}>PDF</div>
+            <div className={styles.documentInfo}>
+              <div className={styles.documentTitle}>{this.t('signedPdfDocument')}</div>
+              <div className={styles.documentName}>{this.getFileNameFromUrl(signedPdfUrl) || this.t('signedPdfDocument')}</div>
+            </div>
+            <a
+              className={styles.documentLink}
+              href={signedPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {this.t('openDocument')}
+            </a>
+          </div>
+        }
       </div>
     );
   }
@@ -1666,68 +2480,176 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     }
 
     return (
-      <div className={styles.actionBox}>
-        <h4>{this.t('officeManagerActions')}</h4>
-
-        <div className={styles.formRow}>
-          <label>{this.t('officeManagerComment')}</label>
-          <textarea
-            value={this.state.officeManagerComment}
-            onChange={(e: any) => this.setState({ officeManagerComment: e.target.value })}
-          />
+      <div className={styles.actionPanel}>
+        <div className={styles.actionPanelHeader}>
+          <div className={styles.sectionTitleBlock}>
+            <div className={styles.sectionEyebrow}>{this.t('officeManagerWorkspace')}</div>
+            <h4>{this.t('officeManagerActions')}</h4>
+            <div className={styles.sectionDescription}>{this.t('officeManagerWorkspaceDescription')}</div>
+          </div>
+          {this.renderStatusBadge(item.Status)}
         </div>
 
-        {item.Status === 'Returned from HOD' &&
-          <div className={styles.formRow}>
-            <label>{this.t('hodComment')}</label>
-            <textarea value={item.HODComment || ''} readOnly={true} />
-          </div>
-        }
+        <div className={styles.actionPanelBody}>
+          <div className={styles.workspaceGrid}>
+            <div className={styles.officeDocumentArea}>
+              <div className={styles.officeDocumentIntro}>
+                <strong>{this.t('officeManagerDocument')}</strong>
+                {this.t('officeManagerDocumentDescription')}
+              </div>
+              {this.renderOfficeManagerDocumentEditor(item)}
+            </div>
 
-        {item.Status === 'GM Signed Pending Office Manager Confirmation' &&
-          <div className={styles.formRow}>
-            <label>{this.t('gmCommentNotes')}</label>
-            <textarea
-              value={this.state.gmComment}
-              onChange={(e: any) => this.setState({ gmComment: e.target.value })}
-            />
+            <div>
+              <div className={styles.formRow}>
+                <label htmlFor="gm-office-manager-comment">{this.t('officeManagerComment')}</label>
+                <textarea
+                  id="gm-office-manager-comment"
+                  value={this.state.officeManagerComment}
+                  onChange={(e: any) => this.setState({ officeManagerComment: e.target.value })}
+                />
+              </div>
+
+              {item.Status === 'Returned from HOD' &&
+                <div className={styles.formRow}>
+                  <label htmlFor="gm-hod-comment-readonly">{this.t('hodComment')}</label>
+                  <textarea id="gm-hod-comment-readonly" value={item.HODComment || ''} readOnly={true} />
+                </div>
+              }
+
+              {item.Status === 'GM Signed Pending Office Manager Confirmation' &&
+                <div className={styles.formRow}>
+                  <label htmlFor="gm-general-manager-comment">{this.t('gmCommentNotes')}</label>
+                  <textarea
+                    id="gm-general-manager-comment"
+                    value={this.state.gmComment}
+                    onChange={(e: any) => this.setState({ gmComment: e.target.value })}
+                  />
+                </div>
+              }
+            </div>
           </div>
-        }
+        </div>
 
         {item.Status === 'Pending Office Manager' &&
-          <div>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('On Hold')}>{this.t('putOnHold')}</button>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Sent to HOD')}>{this.t('sendToHod')}</button>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Pending GM Signature')}>{this.t('sendToGmSignature')}</button>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Rejected')}>{this.t('reject')}</button>
+          <div className={styles.actionFooter}>
+            <button type="button" className={styles.buttonWarning} disabled={this.state.saving} onClick={() => this.officeManagerAction('On Hold')}>{this.t('putOnHold')}</button>
+            <button type="button" className={styles.buttonSecondary} disabled={this.state.saving} onClick={() => this.officeManagerAction('Sent to HOD')}>{this.t('sendToHod')}</button>
+            <button type="button" className={styles.buttonPrimary} disabled={this.state.saving} onClick={() => this.officeManagerAction('Pending GM Signature')}>{this.t('sendToGmSignature')}</button>
+            <button type="button" className={styles.buttonDanger} disabled={this.state.saving} onClick={() => this.officeManagerAction('Rejected')}>{this.t('reject')}</button>
           </div>
         }
 
         {item.Status === 'On Hold' &&
-          <div>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Pending Office Manager')}>{this.t('returnToPendingOfficeManager')}</button>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Rejected')}>{this.t('reject')}</button>
+          <div className={styles.actionFooter}>
+            <button type="button" className={styles.buttonPrimary} disabled={this.state.saving} onClick={() => this.officeManagerAction('Pending Office Manager')}>{this.t('returnToPendingOfficeManager')}</button>
+            <button type="button" className={styles.buttonDanger} disabled={this.state.saving} onClick={() => this.officeManagerAction('Rejected')}>{this.t('reject')}</button>
           </div>
         }
 
         {item.Status === 'Returned from HOD' &&
-          <div>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Pending GM Signature')}>{this.t('sendToGmSignature')}</button>
-            <button disabled={this.state.saving} onClick={() => this.officeManagerAction('Rejected')}>{this.t('reject')}</button>
+          <div className={styles.actionFooter}>
+            <button type="button" className={styles.buttonPrimary} disabled={this.state.saving} onClick={() => this.officeManagerAction('Pending GM Signature')}>{this.t('sendToGmSignature')}</button>
+            <button type="button" className={styles.buttonDanger} disabled={this.state.saving} onClick={() => this.officeManagerAction('Rejected')}>{this.t('reject')}</button>
           </div>
         }
 
         {item.Status === 'GM Signed Pending Office Manager Confirmation' &&
-          <div>
-            <button disabled={this.state.saving} onClick={() => this.confirmGmApproval()}>{this.t('confirmGmApproval')}</button>
+          <div className={styles.actionFooter}>
+            <button type="button" className={styles.buttonPrimary} disabled={this.state.saving} onClick={() => this.confirmGmApproval()}>{this.t('confirmGmApproval')}</button>
           </div>
         }
 
         {item.Status === 'Approved by GM' &&
-          <div>
-            <button disabled={this.state.saving} onClick={() => this.closeRequest()}>{this.t('closeRequest')}</button>
+          <div className={styles.actionFooter}>
+            <button type="button" className={styles.buttonPrimary} disabled={this.state.saving} onClick={() => this.closeRequest()}>{this.t('closeRequest')}</button>
           </div>
         }
+      </div>
+    );
+  }
+
+  private renderOfficeManagerDocumentEditor(item: IRequestItem): JSX.Element {
+    if (!this.state.showOfficeManagerEditor) {
+      return (
+        <button
+          type="button"
+          className={styles.wordLaunchButton}
+          disabled={this.state.saving}
+          onClick={() => this.openOfficeManagerDocumentEditor(item)}
+        >
+          <span className={styles.wordIcon}>W</span>
+          <span>
+            {this.getOfficeManagerPdfUrl(item) ? this.t('editOfficeManagerDocument') : this.t('createOfficeManagerDocument')}
+          </span>
+        </button>
+      );
+    }
+
+    return (
+      <div className={styles.editorShell}>
+        <div className={styles.editorHeader}>
+          <span className={styles.wordIcon}>W</span>
+          <span className={styles.editorHeaderText}>
+            {this.t('editorTitle')} · {this.buildOfficeManagerPdfFileName(item.RequestNo)}
+          </span>
+        </div>
+
+        <div className={styles.editorToolbar} role="toolbar" aria-label={this.t('editorTitle')}>
+          <select
+            className={styles.toolSelect}
+            defaultValue="P"
+            title={this.t('paragraph')}
+            aria-label={this.t('paragraph')}
+            disabled={this.state.saving}
+            onChange={(e: any) => this.applyEditorCommand(e, 'formatBlock', e.target.value)}
+          >
+            <option value="P">{this.t('paragraph')}</option>
+            <option value="H2">{this.t('heading')}</option>
+          </select>
+          <button type="button" className={styles.toolButton} title={this.t('bold')} aria-label={this.t('bold')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'bold')}><strong>B</strong></button>
+          <button type="button" className={styles.toolButton} title={this.t('italic')} aria-label={this.t('italic')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'italic')}><em>I</em></button>
+          <button type="button" className={styles.toolButton} title={this.t('underline')} aria-label={this.t('underline')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'underline')}><span style={{ textDecoration: 'underline' }}>U</span></button>
+          <button type="button" className={styles.toolButton} title={this.t('bullets')} aria-label={this.t('bullets')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'insertUnorderedList')}>• List</button>
+          <button type="button" className={styles.toolButton} title={this.t('alignLeft')} aria-label={this.t('alignLeft')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'justifyLeft')}>⇤</button>
+          <button type="button" className={styles.toolButton} title={this.t('alignCenter')} aria-label={this.t('alignCenter')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'justifyCenter')}>↔</button>
+          <button type="button" className={styles.toolButton} title={this.t('alignRight')} aria-label={this.t('alignRight')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'justifyRight')}>⇥</button>
+          <button type="button" className={styles.toolButton} title={this.t('undo')} aria-label={this.t('undo')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'undo')}>↶</button>
+          <button type="button" className={styles.toolButton} title={this.t('redo')} aria-label={this.t('redo')} disabled={this.state.saving} onMouseDown={(e: any) => this.applyEditorCommand(e, 'redo')}>↷</button>
+        </div>
+
+        <div
+          className={styles.documentPage}
+          ref={(element: HTMLDivElement) => { this.officeManagerEditor = element; }}
+          contentEditable={!this.state.saving}
+          suppressContentEditableWarning={true}
+          role="textbox"
+          aria-multiline={true}
+          aria-label={this.t('editorTitle')}
+          dir={this.state.language === 'ar' ? 'rtl' : 'ltr'}
+          spellCheck={true}
+          onInput={() => this.onEditorInput()}
+          dangerouslySetInnerHTML={{ __html: this.officeManagerDocumentHtml }}
+        />
+
+        <div className={styles.editorActions}>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            disabled={this.state.saving}
+            onClick={() => this.createAndAttachOfficeManagerPdf()}
+          >
+            {this.state.saving ? this.t('generatingPdf') : this.t('createAttachPdf')}
+          </button>
+          <button
+            type="button"
+            className={styles.buttonSecondary}
+            disabled={this.state.saving}
+            onClick={() => this.closeOfficeManagerDocumentEditor()}
+          >
+            {this.t('closeEditor')}
+          </button>
+        </div>
       </div>
     );
   }
@@ -1738,25 +2660,38 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     }
 
     return (
-      <div className={styles.actionBox}>
-        <h4>{this.t('hodActions')}</h4>
-
-        <div className={styles.formRow}>
-          <label>{this.t('officeManagerComment')}</label>
-          <textarea value={item.OfficeManagerComment || ''} readOnly={true} />
+      <div className={styles.actionPanel}>
+        <div className={styles.actionPanelHeader}>
+          <h4>{this.t('hodActions')}</h4>
+          {this.renderStatusBadge(item.Status)}
         </div>
 
-        <div className={styles.formRow}>
-          <label>{this.t('hodComment')}</label>
-          <textarea
-            value={this.state.hodComment}
-            onChange={(e: any) => this.setState({ hodComment: e.target.value })}
-          />
+        <div className={styles.actionPanelBody}>
+          <div className={styles.formRow}>
+            <label htmlFor="gm-hod-office-comment">{this.t('officeManagerComment')}</label>
+            <textarea id="gm-hod-office-comment" value={item.OfficeManagerComment || ''} readOnly={true} />
+          </div>
+
+          <div className={styles.formRow}>
+            <label htmlFor="gm-hod-comment">{this.t('hodComment')}</label>
+            <textarea
+              id="gm-hod-comment"
+              value={this.state.hodComment}
+              onChange={(e: any) => this.setState({ hodComment: e.target.value })}
+            />
+          </div>
         </div>
 
-        <button disabled={this.state.saving} onClick={() => this.hodReturnToOfficeManager()}>
-          {this.t('returnToOfficeManager')}
-        </button>
+        <div className={styles.actionFooter}>
+          <button
+            type="button"
+            className={styles.buttonPrimary}
+            disabled={this.state.saving}
+            onClick={() => this.hodReturnToOfficeManager()}
+          >
+            {this.t('returnToOfficeManager')}
+          </button>
+        </div>
       </div>
     );
   }
