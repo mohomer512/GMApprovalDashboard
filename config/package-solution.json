@@ -3,7 +3,7 @@
   "solution": {
     "name": "gm-approval-dashboard-client-side-solution",
     "id": "d6fb1009-1cf2-4ae1-b956-b1b2c5e6c52a",
-    "version": "1.0.0.0",
+    "version": "1.0.0.4",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true
   },

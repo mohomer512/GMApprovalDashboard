@@ -91,13 +91,14 @@ interface ITranslatedText {
 
 export default class GmApprovalDashboard extends React.Component<IGmApprovalDashboardProps, IGmApprovalDashboardState> {
 
+  private buildVersion: string = '0.0.5';
   private gmSiteUrl: string = 'http://spse26h/GM';
   private requestsListName: string = 'GM Requests';
   private documentsLibraryName: string = 'GM Approval Documents';
-  private documentsLibraryServerRelativeUrl: string = '/GM/GM Approval Documents';
   private sharedFolderRootPath: string = '\\\\SPSE26H\\GMApprovalShare';
   private pdfJsonFieldName: string = 'PDFFileJson';
   private odataJsonHeader: string = 'application/json;odata=verbose';
+  private odataVersion: string = '3.0';
   private requestsListItemEntityTypeFullName: string = '';
   private documentsLibraryListItemEntityTypeFullName: string = '';
   private pdfFileInput: HTMLInputElement;
@@ -456,7 +457,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     return {
       headers: {
         'Accept': this.odataJsonHeader,
-        'odata-version': ''
+        'OData-Version': this.odataVersion
       }
     };
   }
@@ -466,7 +467,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       headers: {
         'Accept': this.odataJsonHeader,
         'Content-Type': this.odataJsonHeader,
-        'odata-version': ''
+        'OData-Version': this.odataVersion
       },
       body: JSON.stringify(values)
     };
@@ -479,7 +480,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
         'Content-Type': this.odataJsonHeader,
         'IF-MATCH': '*',
         'X-HTTP-Method': 'MERGE',
-        'odata-version': ''
+        'OData-Version': this.odataVersion
       },
       body: JSON.stringify(values)
     };
@@ -1087,17 +1088,19 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     role: string,
     documentType: string
   ): Promise<IPdfUploadResult> {
+    const folderName: string = this.sanitizeSharePointFolderName(requestNo);
+
     return this.getRequestDocumentFolderServerRelativeUrl(requestNo)
-      .then((folderServerRelativeUrl: string) => {
-        const uploadUrl: string = this.webUrl +
-          "/_api/web/GetFolderByServerRelativeUrl('" + this.escapeODataString(folderServerRelativeUrl) + "')" +
-          "/Files/add(url='" + this.escapeODataString(fileName) + "',overwrite=true)";
+      .then(() => {
+        const uploadUrl: string = this.getDocumentsLibraryFolderApiUrl(folderName) +
+          "/Files/Add(url='" + this.encodeODataUrlValue(fileName) + "',overwrite=true)" +
+          "?$select=Name,ServerRelativeUrl";
 
         const options: ISPHttpClientOptions = {
           headers: {
             'Accept': this.odataJsonHeader,
-            'Content-Type': 'application/pdf',
-            'odata-version': ''
+            'Content-Type': 'application/octet-stream',
+            'OData-Version': this.odataVersion
           },
           body: fileContent
         };
@@ -1107,7 +1110,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           .then((response: SPHttpClientResponse) => {
             if (!response.ok) {
               return response.text().then((text: string) => {
-                throw new Error(this.formatText('errorLibraryUpload', text));
+                throw this.createSharePointHttpError('Upload PDF to request folder', response, text, uploadUrl);
               });
             }
 
@@ -1115,8 +1118,14 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           })
           .then((data: any) => {
             const uploadedFile: any = data.d ? data.d : data;
-            const serverRelativeUrl: string = uploadedFile.ServerRelativeUrl ||
-              (folderServerRelativeUrl + '/' + fileName);
+            const serverRelativeUrl: string = uploadedFile && uploadedFile.ServerRelativeUrl;
+
+            if (!serverRelativeUrl) {
+              throw new Error(
+                'Upload PDF to request folder succeeded, but SharePoint did not return ServerRelativeUrl. ' +
+                'Request: ' + uploadUrl
+              );
+            }
 
             return {
               role: role,
@@ -1130,6 +1139,15 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
               attachmentUrl: ''
             };
           });
+      })
+      .catch((error: any) => {
+        const message: string = this.getErrorMessage(error);
+
+        if (message.indexOf(this.t('errorRequestFolder').replace('{0}', '')) === 0) {
+          throw error;
+        }
+
+        throw new Error(this.formatText('errorLibraryUpload', message));
       });
   }
 
@@ -1190,46 +1208,71 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   }
 
   private replacePdfFileOnRequestItem(itemId: number, fileName: string, fileContent: ArrayBuffer): Promise<string> {
-    return this.deleteRequestAttachmentIfExists(itemId, fileName)
-      .then(() => this.attachPdfFileToRequestItem(itemId, fileName, fileContent));
-  }
-
-  private deleteRequestAttachmentIfExists(itemId: number, fileName: string): Promise<void> {
-    const url: string = this.webUrl +
-      "/_api/web/lists/GetByTitle('" + this.escapeODataString(this.requestsListName) + "')" +
-      "/items(" + itemId + ")/AttachmentFiles/getByFileName('" + this.escapeODataString(fileName) + "')";
-    const options: ISPHttpClientOptions = {
-      headers: {
-        'Accept': this.odataJsonHeader,
-        'IF-MATCH': '*',
-        'X-HTTP-Method': 'DELETE',
-        'odata-version': ''
-      }
-    };
+    const attachmentFileName: string = this.sanitizeSharePointAttachmentFileName(fileName);
+    const collectionUrl: string = this.getRequestAttachmentCollectionApiUrl(itemId);
+    const listUrl: string = collectionUrl + '?$select=FileName,ServerRelativeUrl';
 
     return this.props.context.spHttpClient
-      .post(url, SPHttpClient.configurations.v1, options)
+      .get(listUrl, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
       .then((response: SPHttpClientResponse) => {
-        if (response.ok || response.status === 404) {
-          return;
+        if (!response.ok) {
+          return response.text().then((text: string) => {
+            throw this.createSharePointHttpError('List request attachments', response, text, listUrl);
+          });
         }
 
-        return response.text().then((text: string) => {
-          throw new Error(this.formatText('errorListAttachment', text));
-        });
+        return response.json();
+      })
+      .then((data: any) => {
+        const collection: any = data.d ? data.d : data;
+        const attachments: any[] = collection.results || collection.value || [];
+        let existingAttachment: any = null;
+
+        for (let i: number = 0; i < attachments.length; i++) {
+          const attachment: any = attachments[i];
+          const existingFileName: string = attachment && attachment.FileName
+            ? attachment.FileName.toLowerCase()
+            : '';
+
+          if (existingFileName === attachmentFileName.toLowerCase()) {
+            existingAttachment = attachment;
+            break;
+          }
+        }
+
+        if (!existingAttachment) {
+          return this.attachPdfFileToRequestItem(itemId, attachmentFileName, fileContent);
+        }
+
+        return this.updatePdfFileOnRequestItem(itemId, attachmentFileName, fileContent)
+          .then(() => {
+            return existingAttachment.ServerRelativeUrl
+              ? this.getAbsoluteUrl(existingAttachment.ServerRelativeUrl)
+              : '';
+          });
+      })
+      .catch((error: any) => {
+        const message: string = this.getErrorMessage(error);
+        const localizedPrefix: string = this.t('errorListAttachment').replace('{0}', '');
+
+        if (message.indexOf(localizedPrefix) === 0) {
+          throw error;
+        }
+
+        throw new Error(this.formatText('errorListAttachment', message));
       });
   }
 
   private attachPdfFileToRequestItem(itemId: number, fileName: string, fileContent: ArrayBuffer): Promise<string> {
-    const attachmentUrl: string = this.webUrl +
-      "/_api/web/lists/GetByTitle('" + this.escapeODataString(this.requestsListName) + "')" +
-      "/items(" + itemId + ")/AttachmentFiles/add(FileName='" + this.escapeODataString(fileName) + "')";
+    const attachmentFileName: string = this.sanitizeSharePointAttachmentFileName(fileName);
+    const attachmentUrl: string = this.getRequestAttachmentCollectionApiUrl(itemId) +
+      "/add(FileName='" + this.encodeODataUrlValue(attachmentFileName) + "')";
 
     const options: ISPHttpClientOptions = {
       headers: {
         'Accept': this.odataJsonHeader,
         'Content-Type': 'application/pdf',
-        'odata-version': ''
+        'OData-Version': this.odataVersion
       },
       body: fileContent
     };
@@ -1239,7 +1282,13 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       .then((response: SPHttpClientResponse) => {
         if (!response.ok) {
           return response.text().then((text: string) => {
-            throw new Error(this.formatText('errorListAttachment', text));
+            const error: Error = this.createSharePointHttpError(
+              'Add request list attachment',
+              response,
+              text,
+              attachmentUrl
+            );
+            throw new Error(this.formatText('errorListAttachment', error.message));
           });
         }
 
@@ -1262,6 +1311,53 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           return '';
         });
       });
+  }
+
+  private updatePdfFileOnRequestItem(itemId: number, fileName: string, fileContent: ArrayBuffer): Promise<void> {
+    const updateUrl: string = this.getRequestAttachmentCollectionApiUrl(itemId) +
+      "('" + this.encodeODataUrlValue(fileName) + "')/$value";
+    const options: ISPHttpClientOptions = {
+      headers: {
+        'Accept': this.odataJsonHeader,
+        'Content-Type': 'application/pdf',
+        'IF-MATCH': '*',
+        'X-HTTP-Method': 'PUT',
+        'OData-Version': this.odataVersion
+      },
+      body: fileContent
+    };
+
+    return this.props.context.spHttpClient
+      .post(updateUrl, SPHttpClient.configurations.v1, options)
+      .then((response: SPHttpClientResponse) => {
+        if (!response.ok) {
+          return response.text().then((text: string) => {
+            throw this.createSharePointHttpError('Update request list attachment', response, text, updateUrl);
+          });
+        }
+      });
+  }
+
+  private getRequestAttachmentCollectionApiUrl(itemId: number): string {
+    return this.webUrl +
+      "/_api/web/lists/GetByTitle('" + this.encodeODataUrlValue(this.requestsListName) + "')" +
+      '/items(' + itemId + ')/AttachmentFiles';
+  }
+
+  private sanitizeSharePointAttachmentFileName(fileName: string): string {
+    let baseName: string = (fileName || 'attachment.pdf').replace(/\.pdf$/i, '');
+    baseName = baseName.replace(/[^A-Za-z0-9_-]+/g, '-');
+    baseName = baseName.replace(/-+/g, '-').replace(/^[-_]+/, '').replace(/[-_]+$/, '');
+
+    if (!baseName) {
+      baseName = 'attachment';
+    }
+
+    if (baseName.length > 116) {
+      baseName = baseName.substring(0, 116).replace(/[-_]+$/, '');
+    }
+
+    return (baseName || 'attachment') + '.pdf';
   }
 
   private updatePdfMetadata(
@@ -1417,98 +1513,137 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
     });
   }
 
-  private getDocumentsLibraryServerRelativeUrl(): Promise<string> {
-    const url: string = this.webUrl +
-      "/_api/web/lists/GetByTitle('" + this.escapeODataString(this.documentsLibraryName) + "')" +
-      "?$select=RootFolder/ServerRelativeUrl&$expand=RootFolder";
+  private getRequestDocumentFolderServerRelativeUrl(requestNo: string): Promise<string> {
+    const folderName: string = this.sanitizeSharePointFolderName(requestNo);
+    const folderApiUrl: string = this.getDocumentsLibraryFolderApiUrl(folderName);
+    const getFolderUrl: string = folderApiUrl + '?$select=ServerRelativeUrl';
 
     return this.props.context.spHttpClient
-      .get(url, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
+      .get(getFolderUrl, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
       .then((response: SPHttpClientResponse) => {
-        if (!response.ok) {
+        if (response.ok) {
+          return this.readFolderServerRelativeUrl(response);
+        }
+
+        if (response.status !== 404) {
           return response.text().then((text: string) => {
-            throw new Error(this.formatText('errorDocumentsLibraryMissing', text));
+            throw this.createSharePointHttpError('Open request folder', response, text, getFolderUrl);
           });
         }
 
-        return response.json();
-      })
-      .then((data: any) => {
-        const item: any = data.d ? data.d : data;
-        const rootFolder: any = item.RootFolder;
-
-        if (rootFolder && rootFolder.ServerRelativeUrl) {
-          return rootFolder.ServerRelativeUrl;
-        }
-
-        return this.documentsLibraryServerRelativeUrl;
-      })
-      .catch(() => {
-        return this.documentsLibraryServerRelativeUrl;
-      });
-  }
-
-  private getRequestDocumentFolderServerRelativeUrl(requestNo: string): Promise<string> {
-    return this.getDocumentsLibraryServerRelativeUrl()
-      .then((libraryRootUrl: string) => {
-        const folderName: string = this.sanitizeSharePointFolderName(requestNo);
-        const folderUrl: string = libraryRootUrl.replace(/\/+$/, '') + '/' + folderName;
-
-        return this.ensureSharePointFolder(folderUrl)
-          .then(() => folderUrl);
+        return this.createRequestDocumentFolder(folderName, getFolderUrl);
       })
       .catch((error: any) => {
         throw new Error(this.formatText('errorRequestFolder', this.getErrorMessage(error)));
       });
   }
 
-  private ensureSharePointFolder(folderServerRelativeUrl: string): Promise<void> {
-    const getFolderUrl: string = this.webUrl +
-      "/_api/web/GetFolderByServerRelativeUrl('" + this.escapeODataString(folderServerRelativeUrl) + "')" +
+  private createRequestDocumentFolder(folderName: string, getFolderUrl: string): Promise<string> {
+    const createFolderUrl: string = this.getDocumentsLibraryRootFolderApiUrl() +
+      "/Folders/Add(url='" + this.encodeODataUrlValue(folderName) + "')" +
       "?$select=ServerRelativeUrl";
+    const options: ISPHttpClientOptions = {
+      headers: {
+        'Accept': this.odataJsonHeader,
+        'Content-Type': this.odataJsonHeader,
+        'OData-Version': this.odataVersion
+      }
+    };
 
+    return this.props.context.spHttpClient
+      .post(createFolderUrl, SPHttpClient.configurations.v1, options)
+      .then((response: SPHttpClientResponse) => {
+        if (response.ok) {
+          return this.readFolderServerRelativeUrl(response)
+            .catch(() => this.getVerifiedFolderServerRelativeUrl(getFolderUrl));
+        }
+
+        return response.text().then((text: string) => {
+          return this.getVerifiedFolderServerRelativeUrl(getFolderUrl)
+            .catch(() => {
+              throw this.createSharePointHttpError('Create request folder', response, text, createFolderUrl);
+            });
+        });
+      });
+  }
+
+  private getVerifiedFolderServerRelativeUrl(getFolderUrl: string): Promise<string> {
     return this.props.context.spHttpClient
       .get(getFolderUrl, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
       .then((response: SPHttpClientResponse) => {
-        if (response.ok) {
-          return;
-        }
-
-        if (response.status !== 404) {
+        if (!response.ok) {
           return response.text().then((text: string) => {
-            throw new Error(text);
+            throw this.createSharePointHttpError('Verify request folder', response, text, getFolderUrl);
           });
         }
 
-        const createFolderUrl: string = this.webUrl +
-          "/_api/web/folders/add('" + this.escapeODataString(folderServerRelativeUrl) + "')";
-        const options: ISPHttpClientOptions = {
-          headers: {
-            'Accept': this.odataJsonHeader,
-            'Content-Type': this.odataJsonHeader,
-            'odata-version': ''
-          }
-        };
+        return this.readFolderServerRelativeUrl(response);
+      });
+  }
 
-        return this.props.context.spHttpClient
-          .post(createFolderUrl, SPHttpClient.configurations.v1, options)
-          .then((createResponse: SPHttpClientResponse) => {
-            if (createResponse.ok) {
-              return;
-            }
+  private getDocumentsLibraryRootFolderApiUrl(): string {
+    return this.webUrl +
+      "/_api/web/lists/GetByTitle('" + this.encodeODataUrlValue(this.documentsLibraryName) + "')" +
+      '/RootFolder';
+  }
 
-            return this.props.context.spHttpClient
-              .get(getFolderUrl, SPHttpClient.configurations.v1, this.getJsonRequestOptions())
-              .then((retryResponse: SPHttpClientResponse) => {
-                if (retryResponse.ok) {
-                  return;
-                }
+  private getDocumentsLibraryFolderApiUrl(folderName: string): string {
+    return this.getDocumentsLibraryRootFolderApiUrl() +
+      "/Folders/GetByUrl('" + this.encodeODataUrlValue(folderName) + "')";
+  }
 
-                return createResponse.text().then((text: string) => {
-                  throw new Error(text);
-                });
-              });
-          });
+  private encodeODataUrlValue(value: string): string {
+    const escapedValue: string = this.escapeODataString(value);
+
+    return encodeURIComponent(escapedValue)
+      .replace(/!/g, '%21')
+      .replace(/'/g, '%27')
+      .replace(/\(/g, '%28')
+      .replace(/\)/g, '%29')
+      .replace(/\*/g, '%2A');
+  }
+
+  private createSharePointHttpError(
+    operation: string,
+    response: SPHttpClientResponse,
+    responseText: string,
+    requestUrl: string
+  ): Error {
+    let detail: string = responseText || 'SharePoint returned an empty response.';
+
+    try {
+      const parsed: any = JSON.parse(responseText);
+      const sharePointError: any = parsed.error || parsed['odata.error'];
+
+      if (sharePointError) {
+        const code: string = sharePointError.code || '';
+        const errorMessage: any = sharePointError.message;
+        const message: string = errorMessage && errorMessage.value
+          ? errorMessage.value
+          : (typeof errorMessage === 'string' ? errorMessage : '');
+        detail = (code ? code + ': ' : '') + (message || detail);
+      }
+    } catch (e) {
+      detail = responseText || detail;
+    }
+
+    return new Error(
+      operation + ' failed (HTTP ' + response.status +
+      (response.statusText ? ' ' + response.statusText : '') + '). ' +
+      detail + ' Request: ' + requestUrl
+    );
+  }
+
+  private readFolderServerRelativeUrl(response: SPHttpClientResponse): Promise<string> {
+    return response.json()
+      .then((data: any) => {
+        const folder: any = data.d ? data.d : data;
+
+        if (!folder || !folder.ServerRelativeUrl) {
+          throw new Error('SharePoint did not return a valid folder ServerRelativeUrl.');
+        }
+
+        return folder.ServerRelativeUrl;
       });
   }
 
@@ -1668,7 +1803,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
       const attachmentFileName: string = (attachment.FileName || '').toLowerCase();
       const serverRelativeUrl: string = attachment.ServerRelativeUrl || '';
 
-      if (serverRelativeUrl && attachmentFileName.indexOf('officemanager(') !== 0) {
+      if (serverRelativeUrl && attachmentFileName.indexOf('officemanager') !== 0) {
         return this.getAbsoluteUrl(serverRelativeUrl);
       }
     }
@@ -1876,7 +2011,9 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
   }
 
   private buildOfficeManagerPdfFileName(requestNo: string): string {
-    return 'OfficeManager(' + this.sanitizeSharePointFolderName(requestNo) + ').pdf';
+    return this.sanitizeSharePointAttachmentFileName(
+      'OfficeManager-' + this.sanitizeSharePointFolderName(requestNo) + '.pdf'
+    );
   }
 
   private buildPdfJsonSnapshot(item: IRequestItem): string {
@@ -2078,7 +2215,7 @@ export default class GmApprovalDashboard extends React.Component<IGmApprovalDash
           {!this.state.loading && this.renderDetailsPanel()}
 
           <div className={styles.footer}>
-            {this.t('footer')}
+            {this.t('footer')} · v{this.buildVersion}
           </div>
         </div>
       </div>
