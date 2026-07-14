@@ -15,12 +15,24 @@
 
   "preconfiguredEntries": [{
     "groupId": "5c03119e-3074-46fd-976b-c60198311f70", // Other
-    "group": { "default": "Other" },
-    "title": { "default": "GMApprovalDashboard" },
-    "description": { "default": "	Approval App" },
+    "group": {
+      "default": "أخرى",
+      "en-us": "Other",
+      "ar-sa": "أخرى"
+    },
+    "title": {
+      "default": "لوحة موافقات المدير العام",
+      "en-us": "GM Approval Dashboard",
+      "ar-sa": "لوحة موافقات المدير العام"
+    },
+    "description": {
+      "default": "إدارة طلبات وموافقات المدير العام",
+      "en-us": "Manage General Manager requests and approvals",
+      "ar-sa": "إدارة طلبات وموافقات المدير العام"
+    },
     "officeFabricIconFontName": "Page",
     "properties": {
-      "description": "GMApprovalDashboard"
+      "description": "لوحة موافقات المدير العام"
     }
   }]
 }

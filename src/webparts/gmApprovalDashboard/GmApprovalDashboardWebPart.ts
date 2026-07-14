@@ -17,29 +17,17 @@ export interface IGmApprovalDashboardWebPartProps {
 
 export default class GmApprovalDashboardWebPart extends BaseClientSideWebPart<IGmApprovalDashboardWebPartProps> {
 
-  // public render(): void {
-  //   const element: React.ReactElement<IGmApprovalDashboardProps > = React.createElement(
-  //     GmApprovalDashboard,
-  //     {
-  //       description: this.properties.description
-  //     }
-  //   );
-
-  //   ReactDom.render(element, this.domElement);
-  // }
-
   public render(): void {
-  const element: React.ReactElement<IGmApprovalDashboardProps> = React.createElement(
-    GmApprovalDashboard,
-    {
-      description: this.properties.description,
-      context: this.context
-    }
-  );
+    const element: React.ReactElement<IGmApprovalDashboardProps> = React.createElement(
+      GmApprovalDashboard,
+      {
+        description: this.properties.description,
+        context: this.context
+      }
+    );
 
-  ReactDom.render(element, this.domElement);
-}
-
+    ReactDom.render(element, this.domElement);
+  }
 
   protected onDispose(): void {
     ReactDom.unmountComponentAtNode(this.domElement);

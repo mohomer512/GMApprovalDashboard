@@ -601,27 +601,53 @@ function Get-RequestPdfFile {
 "@
 
   $items = $Library.GetItems($query)
+  $exactFile = $null
+  $workflowFile = $null
+  $requestFile = $null
   $legacyFile = $null
   $fallbackFile = $null
+  $expectedFileName = $RequestNo + ".pdf"
 
   foreach ($libraryItem in $items) {
     if ($null -eq $libraryItem.File) {
       continue
     }
 
-    if ($null -eq $fallbackFile) {
+    $documentType = (Get-FieldString $libraryItem "DocumentType").Trim()
+
+    if ($null -eq $fallbackFile -and
+        $documentType -ine "HOD PDF" -and
+        $documentType -ine "Secretary PDF") {
       $fallbackFile = $libraryItem.File
     }
 
-    $documentType = (Get-FieldString $libraryItem "DocumentType").Trim()
+    if ($null -eq $exactFile -and $libraryItem.File.Name -ieq $expectedFileName) {
+      $exactFile = $libraryItem.File
+    }
 
-    if ($documentType -ieq "Request PDF") {
-      return $libraryItem.File
+    if ($null -eq $workflowFile -and $documentType -ieq "Workflow PDF") {
+      $workflowFile = $libraryItem.File
+    }
+
+    if ($null -eq $requestFile -and $documentType -ieq "Request PDF") {
+      $requestFile = $libraryItem.File
     }
 
     if ($null -eq $legacyFile -and [string]::IsNullOrWhiteSpace($documentType)) {
       $legacyFile = $libraryItem.File
     }
+  }
+
+  if ($null -ne $exactFile) {
+    return $exactFile
+  }
+
+  if ($null -ne $workflowFile) {
+    return $workflowFile
+  }
+
+  if ($null -ne $requestFile) {
+    return $requestFile
   }
 
   if ($null -ne $legacyFile) {
@@ -742,6 +768,47 @@ function Get-SharePointFileContentHash {
   }
 }
 
+function Update-SignedWorkflowAttachmentIfPresent {
+  param(
+    [Microsoft.SharePoint.SPListItem]$Item,
+    [string]$RequestNo,
+    [byte[]]$PdfBytes
+  )
+
+  $expectedAttachmentName = $RequestNo + ".pdf"
+
+  try {
+    $matchingAttachmentName = $null
+
+    foreach ($attachmentName in $Item.Attachments) {
+      if ([string]$attachmentName -ieq $expectedAttachmentName) {
+        $matchingAttachmentName = [string]$attachmentName
+        break
+      }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($matchingAttachmentName)) {
+      Write-RequestLog $RequestNo ("Signed workflow PDF attachment was not present. Expected attachment: {0}" -f $expectedAttachmentName)
+      return
+    }
+
+    $attachmentUrlPrefix = [string]$Item.Attachments.UrlPrefix
+    $attachmentUrl = $attachmentUrlPrefix.TrimEnd("/") + "/" + $matchingAttachmentName
+    $attachmentFile = $Item.Web.GetFile($attachmentUrl)
+
+    if ($null -eq $attachmentFile -or -not $attachmentFile.Exists) {
+      Write-RequestLog $RequestNo ("Signed workflow PDF attachment was listed but its file was missing: {0}" -f $matchingAttachmentName)
+      return
+    }
+
+    $attachmentFile.SaveBinary($PdfBytes)
+    Write-RequestLog $RequestNo ("Signed workflow PDF attachment updated: {0}" -f $matchingAttachmentName)
+  } catch {
+    Write-RequestLog $RequestNo ("Signed workflow PDF attachment could not be updated: {0}" -f $_.Exception.Message)
+    throw
+  }
+}
+
 function Set-RequestPdfUrls {
   param(
     [Microsoft.SharePoint.SPListItem]$Item,
@@ -763,6 +830,7 @@ function Set-RequestPdfUrls {
     $Item.Update()
   } catch {
     Write-RequestLog $RequestNo ("The edited SharePoint PDF was published, but its URL fields could not be updated: {0}" -f $_.Exception.Message)
+    throw
   }
 }
 
@@ -780,16 +848,17 @@ function Confirm-GmSignedPdf {
     throw ("Cannot publish the signed PDF for {0}. The SharePoint library file was not found." -f $RequestNo)
   }
 
-  $signedPdfUrl = $Item.Web.Site.Url.TrimEnd("/") + "/" + $SharePointFile.ServerRelativeUrl.TrimStart("/")
+  $signedPdfUrl = $Item.Web.Site.MakeFullUrl($SharePointFile.ServerRelativeUrl)
+  $signedBytes = [System.IO.File]::ReadAllBytes($PendingFilePath)
+  $SharePointFile.SaveBinary($signedBytes)
+  Update-SignedWorkflowAttachmentIfPresent $Item $RequestNo $signedBytes
+  Set-RequestPdfUrls $Item $RequestNo $signedPdfUrl
 
   $Item["Status"] = "GM Signed Pending Office Manager Confirmation"
   $Item["GMApprovalDetected"] = $true
   $Item["SharedFolderPath"] = (($ShareUncRoot.TrimEnd("\")) + "\Signed\" + $RequestNo + ".pdf")
   $Item.Update()
 
-  $signedBytes = [System.IO.File]::ReadAllBytes($PendingFilePath)
-  $SharePointFile.SaveBinary($signedBytes)
-  Set-RequestPdfUrls $Item $RequestNo $signedPdfUrl
   Move-LocalFileReplacingDestination $PendingFilePath $SignedFilePath
   Write-RequestLog $RequestNo ("GM signature file change confirmed. Edited PDF moved from Pending to Signed: {0}" -f $SignedFilePath)
   Write-RequestLog $RequestNo ("Edited PDF published to SharePoint: {0}" -f $signedPdfUrl)
@@ -933,7 +1002,10 @@ function Sync-RequestFiles {
     return
   }
 
-  if ($status -eq "GM Signed Pending Office Manager Confirmation" -or $status -eq "Approved by GM") {
+  if ($status -eq "GM Signed Pending Office Manager Confirmation" -or
+      $status -eq "Approved by GM" -or
+      $status -eq "Pending Secretary Information" -or
+      $status -eq "Pending HOD Information") {
     if (Test-Path -LiteralPath $pendingFilePath) {
       if ($null -eq $pdfFile) {
         throw ("Cannot finish moving the signed PDF for {0}. The SharePoint library file was not found." -f $requestNo)
@@ -941,11 +1013,13 @@ function Sync-RequestFiles {
 
       $signedBytes = [System.IO.File]::ReadAllBytes($pendingFilePath)
       $pdfFile.SaveBinary($signedBytes)
+      Update-SignedWorkflowAttachmentIfPresent $Item $requestNo $signedBytes
 
-      $signedPdfUrl = $Item.Web.Site.Url.TrimEnd("/") + "/" + $pdfFile.ServerRelativeUrl.TrimStart("/")
+      $signedPdfUrl = $Item.Web.Site.MakeFullUrl($pdfFile.ServerRelativeUrl)
+      Set-RequestPdfUrls $Item $requestNo $signedPdfUrl
+
       $Item["SharedFolderPath"] = (($ShareUncRoot.TrimEnd("\")) + "\Signed\" + $requestNo + ".pdf")
       $Item.Update()
-      Set-RequestPdfUrls $Item $requestNo $signedPdfUrl
 
       Move-LocalFileReplacingDestination $pendingFilePath $signedFilePath
       Write-RequestLog $requestNo ("Moved remaining Pending PDF to Signed: {0}" -f $signedFilePath)

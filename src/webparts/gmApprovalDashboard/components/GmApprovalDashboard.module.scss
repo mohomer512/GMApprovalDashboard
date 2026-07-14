@@ -3,7 +3,7 @@
   padding: 24px;
   color: #18322b;
   background: #f3f7f5;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -390,6 +390,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.tableViewport:focus {
+  outline: 2px solid #087f5b;
+  outline-offset: 2px;
+}
+
 .table {
   width: 100%;
   min-width: 820px;
@@ -687,6 +692,13 @@
   font-weight: 600;
 }
 
+.ltrValue {
+  display: inline-block;
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
 .documentGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -773,6 +785,72 @@
   background: #edfaf5;
 }
 
+.conversationPanel {
+  margin-top: 22px;
+  overflow: hidden;
+  border: 1px solid #c8ddd5;
+  border-radius: 13px;
+  background: #f8fbfa;
+}
+
+.conversationHeader {
+  padding: 16px 18px;
+  border-bottom: 1px solid #dbe8e3;
+  background: linear-gradient(90deg, #edf8f4 0%, #f9fcfb 100%);
+  color: #587068;
+  font-size: 12px;
+}
+
+.conversationHeader h4 {
+  margin: 0 0 3px;
+  color: #153d32;
+  font-size: 16px;
+}
+
+.conversationList {
+  padding: 16px 18px 5px;
+}
+
+.conversationMessage {
+  position: relative;
+  max-width: 82%;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid #c9ddd5;
+  border-radius: 4px 13px 13px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(18, 76, 58, 0.06);
+}
+
+.conversationMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  margin-bottom: 6px;
+  color: #6d807a;
+  font-size: 11px;
+}
+
+.conversationMeta strong {
+  color: #185d49;
+  font-size: 12px;
+}
+
+.conversationText {
+  color: #203f36;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  unicode-bidi: plaintext;
+}
+
+.conversationTransition {
+  margin-top: 8px;
+  color: #71847e;
+  font-size: 10px;
+}
+
 .actionBox,
 .actionPanel {
   margin-top: 20px;
@@ -845,6 +923,45 @@
   margin-bottom: 3px;
   color: #183b63;
   font-size: 15px;
+}
+
+.sourceToggle {
+  display: inline-flex;
+  max-width: 100%;
+  margin: 0 0 13px;
+  padding: 3px;
+  border: 1px solid #b7cbdc;
+  border-radius: 9px;
+  background: #edf3f8;
+}
+
+.gmApprovalDashboard .sourceButton,
+.gmApprovalDashboard .sourceButtonActive {
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.gmApprovalDashboard .sourceButton {
+  color: #48627a;
+  background: transparent;
+}
+
+.gmApprovalDashboard .sourceButtonActive {
+  color: #ffffff;
+  background: #185abd;
+}
+
+.roleUploadPanel .filePicker {
+  margin-bottom: 10px;
+}
+
+.roleUploadPanel > button {
+  margin-top: 10px;
 }
 
 .gmApprovalDashboard .wordLaunchButton {
@@ -1104,30 +1221,46 @@
   border-left: 1px solid #164f3e;
 }
 
-.rtl .header:after,
-.rtl .launcherSection:after,
-.rtl .detailsHero:after {
+.rtl .header:after {
   right: auto;
   left: -80px;
 }
 
+.rtl .launcherSection:after {
+  right: auto;
+  left: 26px;
+}
+
 .rtl .detailsHero:after {
+  right: auto;
   left: -22px;
 }
 
-.rtl .logoImage,
+.rtl .logoImage {
+  margin-right: 0;
+  margin-left: 24px;
+}
+
 .rtl .loadingCard:before,
-.rtl .statusBadge:before,
-.rtl .documentIcon,
-.rtl .wordIcon,
-.rtl .filePickerIcon,
-.rtl .fileBadge {
+.rtl .wordIcon {
   margin-right: 0;
   margin-left: 12px;
 }
 
 .rtl .statusBadge:before {
+  margin-right: 0;
   margin-left: 6px;
+}
+
+.rtl .documentIcon,
+.rtl .filePickerIcon {
+  margin-right: 0;
+  margin-left: 13px;
+}
+
+.rtl .fileBadge {
+  margin-right: 0;
+  margin-left: 9px;
 }
 
 .rtl .languageSwitcher {
@@ -1148,9 +1281,27 @@
   text-align: right;
 }
 
+.rtl .header h2,
+.rtl .table th,
+.rtl .sectionEyebrow,
+.rtl .metadataLabel {
+  letter-spacing: 0;
+}
+
+.rtl .table th,
+.rtl .metadataLabel {
+  text-transform: none;
+}
+
 .rtl .documentLink {
   margin-right: 12px;
   margin-left: 0;
+}
+
+.rtl .conversationMessage {
+  margin-right: 0;
+  margin-left: auto;
+  border-radius: 13px 4px 13px 13px;
 }
 
 .rtl .error,
@@ -1161,9 +1312,24 @@
   border-left-width: 1px;
 }
 
-.rtl .sectionEyebrow,
-.rtl .metadataLabel {
-  letter-spacing: 0;
+.rtl .error {
+  border-right-color: #b42318;
+  border-left-color: #e39a94;
+}
+
+.rtl .success {
+  border-right-color: #087f5b;
+  border-left-color: #9bd5bc;
+}
+
+.rtl .warning {
+  border-right-color: #a66f00;
+  border-left-color: #e4c36d;
+}
+
+.rtl .infoBox {
+  border-right-color: #185abd;
+  border-left-color: #b8d0e6;
 }
 
 .rtl .toolButton {

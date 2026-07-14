@@ -1,7 +1,7 @@
 define([], function() {
   return {
-    "PropertyPaneDescription": "Description",
-    "BasicGroupName": "Group Name",
-    "DescriptionFieldLabel": "Description Field"
+    "PropertyPaneDescription": "GM Approval Dashboard settings",
+    "BasicGroupName": "General settings",
+    "DescriptionFieldLabel": "Description"
   }
 });

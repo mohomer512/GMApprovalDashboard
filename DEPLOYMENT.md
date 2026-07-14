@@ -19,12 +19,17 @@ C:\GMApprovalDashboard\sharepoint\solution\gm-approval-dashboard.sppkg
 
 Before using PDF creation, verify these fields and permissions:
 
-- `GM Requests` has a plain-text multiple-lines field with internal name `PDFFileJson` and a hyperlink field named `PDFFileUrl`.
+- `GM Requests` has a plain-text multiple-lines field with internal name `PDFFileJson`, configured with enough capacity for the schema-version-3 document metadata and append-only conversation history, and hyperlink fields named `PDFFileUrl` and `SignedPDFUrl`.
+- If `Status` is a Choice field, include `Pending Secretary Information` and `Pending HOD Information` in addition to the existing workflow statuses.
 - List attachments are enabled on `GM Requests`.
-- `GM Approval Documents` has `RequestNo` (text) and `RequestItemId` (number). If `DocumentType` is a Choice field, include both `Request PDF` and `Office Manager PDF`.
+- `GM Approval Documents` has `RequestNo` (text) and `RequestItemId` (number). If `DocumentType` is a Choice field, include `Request PDF`, `Office Manager PDF`, `Workflow PDF`, `HOD PDF`, and `Secretary PDF`.
 - Office Managers have permission to create folders and upload/replace files in `GM Approval Documents`, and to update/attach files to `GM Requests`.
+- Members of `GM Secretaries` have permission to read and update `GM Requests` while replying to `Pending Secretary Information` requests.
+- Members of `GM HODs` (or the legacy `GM HOD` group) have permission to read and update `GM Requests` while replying to `Pending HOD Information` requests.
 
-The web part creates one library folder per request reference. It stores the supporting PDF and `OfficeManager(<request-reference>).pdf` in that folder. `PDFFileJson` uses schema version 2 with a `documents` collection; existing schema-version-1 records are read and upgraded automatically when the Office Manager PDF is saved.
+The web part creates one library folder per request reference. It stores the original supporting PDF separately and saves the Office Manager workflow document as the deterministic `<RequestNo>.pdf`; optional HOD and Secretary documents use `HOD-<RequestNo>.pdf` and `Secretary-<RequestNo>.pdf`. `PDFFileJson` uses schema version 3 with `documents` and `conversation` collections; existing schema-version-1 and schema-version-2 records are read and upgraded without discarding their document metadata or prior role comments.
+
+The file-sync workflow prefers an exact `<RequestNo>.pdf` file, then a document tagged `Workflow PDF`, and then the existing `Request PDF`. `Pending GM Signature` uses the `Pending` share folder. `GM Signed Pending Office Manager Confirmation`, `Approved by GM`, `Pending Secretary Information`, and `Pending HOD Information` use the `Signed` share folder. `Closed` and `Rejected` use `Archive`.
 
 ## Deploy to SharePoint Server
 
